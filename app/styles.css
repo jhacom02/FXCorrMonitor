@@ -1,0 +1,209 @@
+/* FXCorrMonitor — single stylesheet
+   Absolute colors live only in :root. app.py / charts.py parse these tokens. */
+
+:root {
+  --fx-accent: #58A6FF;
+  --fx-corr-pos: #F85149;
+  --fx-corr-neg: #58A6FF;
+  --fx-text-muted: #8B949E;
+  --fx-text-sidebar: #C9D1D9;
+  --fx-border: rgba(128, 128, 128, 0.28);
+  --fx-border-soft: rgba(128, 128, 128, 0.25);
+  --fx-note-border: rgba(128, 128, 128, 0.35);
+  --fx-row-driver-bg: #1F2630;
+  --fx-radius: 6px;
+  --fx-tag-bg: #243244;
+  --fx-tag-border: #36506D;
+  --fx-tag-text: #DCE6F1;
+  --fx-tag-icon: #9FB9D4;
+  --fx-chart-paper: #0E1117;
+  --fx-chart-plot: #161B22;
+  --fx-chart-font: #E6EDF3;
+  --fx-chart-muted: #9DA7B3;
+  --fx-chart-tick: #D0D7DE;
+  --fx-chart-grid: #2A3441;
+  --fx-chart-hline-strong: #4A5568;
+  --fx-chart-hline-soft: #3D4A5C;
+  --fx-chart-band: rgba(88, 166, 255, 0.035);
+  --fx-heatmap-paper: #131820;
+  --fx-heatmap-n1: #2F7FD4;
+  --fx-heatmap-n05: #5A9FD4;
+  --fx-heatmap-0: #343C48;
+  --fx-heatmap-p05: #D47868;
+  --fx-heatmap-p1: #E24B4B;
+  --fx-detail-line: #3FB950;
+}
+
+[data-testid="stSidebar"] {
+  border-right: 1px solid var(--fx-border-soft);
+}
+
+[data-testid="stSidebar"] h1,
+[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3,
+[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] .stMarkdown {
+  color: var(--fx-text-sidebar);
+}
+
+[data-testid="stSidebar"] .stCaption,
+[data-testid="stSidebar"] small,
+[data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+  color: var(--fx-text-muted) !important;
+}
+
+[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {
+  color: var(--fx-text-muted) !important;
+}
+
+div[data-testid="stSlider"] [data-baseweb="slider"] div[role="slider"] {
+  background-color: var(--fx-accent) !important;
+}
+div[data-testid="stSlider"] [data-baseweb="slider"] > div > div {
+  background-color: var(--fx-accent) !important;
+}
+
+[data-testid="stSidebar"] span[data-baseweb="tag"] {
+  background: var(--fx-tag-bg) !important;
+  border: 1px solid var(--fx-tag-border);
+  color: var(--fx-tag-text) !important;
+  border-radius: var(--fx-radius);
+}
+[data-testid="stSidebar"] span[data-baseweb="tag"] svg {
+  color: var(--fx-tag-icon);
+}
+
+header[data-testid="stHeader"] {
+  display: none;
+}
+div[data-testid="stDecoration"] {
+  display: none;
+}
+
+.fx-meta-banner {
+  background: var(--fx-tag-bg);
+  border: 1px solid var(--fx-tag-border);
+  border-radius: var(--fx-radius);
+  padding: 0.55rem 0.85rem;
+  margin-bottom: 0.5rem;
+}
+
+.fx-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.4rem 1rem;
+}
+
+.fx-meta-item {
+  min-width: 0;
+}
+
+.fx-meta-label {
+  color: var(--fx-text-muted);
+  font-size: 0.75rem;
+  font-weight: normal;
+  margin-bottom: 0.1rem;
+}
+
+.fx-meta-value {
+  color: inherit;
+  font-size: 0.95rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.fx-card {
+  background: var(--fx-tag-bg);
+  border: 1px solid var(--fx-tag-border);
+  border-radius: var(--fx-radius);
+  padding: 0.75rem 0.9rem;
+  margin-bottom: 0.45rem;
+  min-height: 72px;
+}
+
+.fx-card .label {
+  color: var(--fx-text-muted);
+  font-size: 0.75rem;
+  margin-bottom: 0.3rem;
+  text-align: left;
+}
+
+.fx-card .value {
+  color: inherit;
+  font-size: 1.15rem;
+  font-weight: 600;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.fx-note {
+  color: var(--fx-text-muted);
+  font-size: 0.82rem;
+  border-left: 3px solid var(--fx-note-border);
+  padding-left: 0.75rem;
+  margin: 0.35rem 0 0.65rem 0;
+}
+
+.fx-section-title {
+  color: inherit;
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 1rem 0 0.25rem 0;
+}
+
+.fx-section-meta {
+  color: var(--fx-text-muted);
+  font-size: 0.82rem;
+  text-align: right;
+  margin: 1rem 0 0.25rem 0;
+}
+
+.fx-rank-line {
+  color: inherit;
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+  margin: 0.15rem 0 0.35rem 0;
+}
+
+.fx-chart-caption {
+  color: var(--fx-text-muted);
+  font-size: 0.78rem;
+  margin: 0 0 0.85rem 0;
+}
+
+.fx-detail-panel {
+  background: var(--fx-chart-plot);
+  border: 1px solid var(--fx-chart-grid);
+  border-radius: var(--fx-radius);
+  padding: 0.75rem 1rem;
+  margin: 0.5rem 0 0.85rem 0;
+  color: var(--fx-chart-font);
+}
+
+.fx-detail-panel ul {
+  margin: 0;
+  padding-left: 1.15rem;
+}
+
+.fx-detail-panel li {
+  margin: 0.2rem 0;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.dataframe td {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1100px) {
+  .fx-meta-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .fx-meta-grid {
+    grid-template-columns: 1fr;
+  }
+}
