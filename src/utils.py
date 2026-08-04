@@ -183,3 +183,30 @@ def db_mtime_key(db_path: Path) -> float:
     if not db_path.exists():
         return 0.0
     return db_path.stat().st_mtime
+
+
+LOOKBACK_PERIODS = ["1M", "3M", "6M", "1Y", "2Y", "3Y", "5Y", "10Y"]
+DEFAULT_LOOKBACK_PERIOD = "1Y"
+
+_LOOKBACK_OFFSETS: dict[str, pd.DateOffset] = {
+    "1M": pd.DateOffset(months=1),
+    "3M": pd.DateOffset(months=3),
+    "6M": pd.DateOffset(months=6),
+    "1Y": pd.DateOffset(years=1),
+    "2Y": pd.DateOffset(years=2),
+    "3Y": pd.DateOffset(years=3),
+    "5Y": pd.DateOffset(years=5),
+    "10Y": pd.DateOffset(years=10),
+}
+
+
+def lookback_range(
+    as_of: date | datetime | pd.Timestamp,
+    period_key: str,
+) -> tuple[pd.Timestamp, pd.Timestamp]:
+    end = pd.Timestamp(as_of).normalize()
+    offset = _LOOKBACK_OFFSETS.get(period_key)
+    if offset is None:
+        offset = _LOOKBACK_OFFSETS[DEFAULT_LOOKBACK_PERIOD]
+    start = (end - offset).normalize()
+    return start, end

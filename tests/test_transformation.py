@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from config.instruments import INSTRUMENT_BY_ID, TARGET_ID
+from config.instruments import INSTRUMENT_BY_ID, TARGET_ID, css_instrument_color
 from src.transformation import (
     align_transformed,
     apply_as_of_cutoff,
@@ -141,7 +141,7 @@ def test_active_false_excluded_from_default_analysis(monkeypatch):
         transformation="log_return",
         alignment="same_day",
         active=False,
-        color="#000000",
+        color=css_instrument_color("USDKRW"),
     )
     monkeypatch.setattr(inst_mod, "INSTRUMENTS", list(inst_mod.INSTRUMENTS) + [inactive])
     active_ids = {i.instrument_id for i in get_active_instruments(include_inactive=False)}

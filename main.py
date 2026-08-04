@@ -52,8 +52,12 @@ def cmd_run(args: argparse.Namespace) -> int:
         "streamlit",
         "run",
         str(app_path),
+        "--server.address",
+        "0.0.0.0",
         "--server.port",
         str(port),
+        "--server.headless",
+        "false",
     ]
     return subprocess.call(cmd, cwd=str(PROJECT_ROOT))
 

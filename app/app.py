@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import sys
-from datetime import date, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -21,28 +20,37 @@ from config.instruments import (
     TARGET_ID,
     get_driver_instruments,
 )
+from config.thresholds import (
+    ABNORMAL_LOG_RETURN,
+    ABNORMAL_VIX_LOG_RETURN,
+    ABNORMAL_YIELD_BP,
+    ANALYSIS_WINDOWS,
+    DISPLAY_MIN_ABS_DEFAULT,
+    display_floor,
+    sig_abs,
+)
 from src.analytics import (
     DRIVER_MIXED,
     DRIVER_NONE,
-    assign_daily_drivers,
-    build_driver_ranking,
     calculate_rolling_correlations,
-    compress_driver_regimes,
-    compute_driver_scores,
-    current_driver_snapshot,
+    classify_driver_status,
     detect_abnormal_returns,
+    latest_top_driver,
     multi_window_correlations,
+    regimes_for_window,
 )
 from src.database import get_db_status, load_market_data
 from src.ingestion import IngestionError, ingest_excel
 from src.transformation import build_analysis_frame
 from src.utils import (
     DEFAULT_DB_PATH,
+    DEFAULT_LOOKBACK_PERIOD,
     DEFAULT_RAW_DIR,
+    LOOKBACK_PERIODS,
     db_mtime_key,
     format_corr,
     format_fx,
-    format_pct,
+    lookback_range,
     setup_logging,
 )
 from src.theme import load_css_vars, read_styles_css
@@ -52,9 +60,8 @@ from src.charts import (
     build_rank_line,
     correlation_heatmap,
     driver_timeline_chart,
-    dual_corr_detail_chart,
+    dual_raw_level_chart,
     rolling_correlation_chart,
-    series_line_chart,
 )
 
 logger = logging.getLogger(__name__)
@@ -103,7 +110,7 @@ def render_empty_state() -> None:
         "2. `data/raw/`에 저장합니다.\n"
         "3. 아래 명령으로 적재합니다.\n\n"
         '`python scripts/ingest_excel.py --file "data/raw/infomax_raw.xlsx"`\n\n'
-        "또는 사이드바 **데이터 업데이트**에서 Excel을 업로드한 뒤 "
+        "또는 사이드바 **엑셀 업로드**에서 Excel을 업로드한 뒤 "
         "**Excel을 SQLite에 적재**를 누르세요.\n\n"
         "본 대시보드는 실시간 데이터가 아닌 **전일 확정 종가**만 사용합니다."
     )
@@ -116,35 +123,19 @@ def sidebar_controls(status: dict) -> dict:
         st.cache_data.clear()
         st.rerun()
 
-    period = st.sidebar.selectbox(
+    period_key = st.sidebar.selectbox(
         "분석 기간",
-        ["최근 1년", "최근 3년", "최근 5년", "전체", "사용자 설정"],
-        index=0,
+        LOOKBACK_PERIODS,
+        index=LOOKBACK_PERIODS.index(DEFAULT_LOOKBACK_PERIOD),
     )
-    custom_start = custom_end = None
-    if period == "사용자 설정":
-        c1, c2 = st.sidebar.columns(2)
-        custom_start = c1.date_input("시작일", value=date.today() - timedelta(days=365))
-        custom_end = c2.date_input("종료일", value=date.today())
 
-    window_choice = st.sidebar.selectbox(
-        "롤링 윈도우",
-        ["20일", "60일", "120일", "사용자 설정"],
-        index=0,
+    min_abs = st.sidebar.slider(
+        "전역 임계값 |ρ|",
+        0.0,
+        1.0,
+        float(DISPLAY_MIN_ABS_DEFAULT),
+        0.05,
     )
-    if window_choice == "사용자 설정":
-        window = st.sidebar.number_input("윈도우(거래일)", min_value=10, max_value=252, value=20, step=1)
-    else:
-        window = int(window_choice.replace("일", ""))
-
-    display_label = st.sidebar.selectbox(
-        "표시 변수 개수",
-        list(DISPLAY_MODE_LABELS.values()),
-        index=0,
-    )
-    display_mode = {v: k for k, v in DISPLAY_MODE_LABELS.items()}[display_label]
-
-    min_abs = st.sidebar.slider("최소 절대 상관계수 |ρ|", 0.0, 1.0, 0.30, 0.05)
 
     drivers = get_driver_instruments()
     all_options = {d.display_name: d.instrument_id for d in drivers}
@@ -212,36 +203,10 @@ def sidebar_controls(status: dict) -> dict:
     ]
 
     return {
-        "period": period,
-        "custom_start": custom_start,
-        "custom_end": custom_end,
-        "window": int(window),
-        "display_mode": display_mode,
-        "display_label": display_label,
+        "period_key": period_key,
         "selected_ids": selected_ids,
         "min_abs": float(min_abs),
     }
-
-
-def resolve_date_range(
-    period: str,
-    as_of: date,
-    custom_start: date | None,
-    custom_end: date | None,
-) -> tuple[pd.Timestamp, pd.Timestamp]:
-    end = pd.Timestamp(as_of)
-    if period == "최근 1년":
-        start = end - pd.DateOffset(years=1)
-    elif period == "최근 3년":
-        start = end - pd.DateOffset(years=3)
-    elif period == "최근 5년":
-        start = end - pd.DateOffset(years=5)
-    elif period == "사용자 설정" and custom_start and custom_end:
-        start = pd.Timestamp(custom_start)
-        end = min(pd.Timestamp(custom_end), end)
-    else:
-        start = pd.Timestamp("1970-01-01")
-    return start.normalize(), end.normalize()
 
 
 def kpi_card(label: str, value: str) -> None:
@@ -256,7 +221,7 @@ def kpi_card(label: str, value: str) -> None:
     )
 
 
-def render_meta_banner(as_of_str: str, controls: dict) -> None:
+def render_meta_banner(as_of_str: str, period_key: str) -> None:
     st.markdown(
         f"""
         <div class="fx-meta-banner">
@@ -267,34 +232,13 @@ def render_meta_banner(as_of_str: str, controls: dict) -> None:
             </div>
             <div class="fx-meta-item">
               <div class="fx-meta-label">분석 기간</div>
-              <div class="fx-meta-value">{controls['period']}</div>
-            </div>
-            <div class="fx-meta-item">
-              <div class="fx-meta-label">롤링 윈도우</div>
-              <div class="fx-meta-value">{controls['window']}일</div>
-            </div>
-            <div class="fx-meta-item">
-              <div class="fx-meta-label">표시 변수 개수</div>
-              <div class="fx-meta-value">{controls['display_label']}</div>
+              <div class="fx-meta-value">{period_key}</div>
             </div>
           </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-
-
-def corr_color(val: float) -> str:
-    muted = _CSS_VARS.get("fx-text-muted")
-    pos = _CSS_VARS.get("fx-corr-pos")
-    neg = _CSS_VARS.get("fx-corr-neg")
-    if pd.isna(val):
-        return f"color:{muted}"
-    if val > 0.05:
-        return f"color:{pos}"
-    if val < -0.05:
-        return f"color:{neg}"
-    return f"color:{muted}"
 
 
 def driver_row_style(is_driver: bool, ncols: int) -> list[str]:
@@ -311,16 +255,14 @@ def _signed_rho_text(val: float | None) -> str:
     return f"{sign}{val:.2f}"
 
 
-def filter_ids_by_min_abs(corr_long: pd.DataFrame, instrument_ids: list[str], min_abs: float) -> list[str]:
-    if corr_long.empty:
-        return []
-    latest = corr_long["date"].max()
-    snap = corr_long[
-        (corr_long["date"] == latest)
-        & (corr_long["instrument_id"].isin(instrument_ids))
-        & (corr_long["abs_correlation"] >= min_abs)
-    ]
-    return list(snap.sort_values("abs_correlation", ascending=False)["instrument_id"])
+def _rho_from_multi(multi: pd.DataFrame, instrument_id: str, window: int) -> float:
+    if multi.empty:
+        return np.nan
+    hit = multi[(multi["instrument_id"] == instrument_id) & (multi["window"] == window)]
+    if hit.empty:
+        return np.nan
+    val = hit.iloc[0]["rolling_correlation"]
+    return float(val) if pd.notna(val) else np.nan
 
 
 def main() -> None:
@@ -361,61 +303,28 @@ def main() -> None:
         as_of_str = frame["analysis_as_of_date"]
         as_of = pd.Timestamp(as_of_str)
 
-        render_meta_banner(as_of_str, controls)
+        render_meta_banner(as_of_str, controls["period_key"])
 
-        start, end = resolve_date_range(
-            controls["period"],
-            as_of.date(),
-            controls["custom_start"],
-            controls["custom_end"],
-        )
+        start, end = lookback_range(as_of, controls["period_key"])
 
         transformed = frame["transformed_wide"]
         raw_aligned = frame["raw_aligned_wide"]
         transformed = transformed.loc[(transformed.index >= start) & (transformed.index <= end)]
         raw_aligned = raw_aligned.loc[(raw_aligned.index >= start) & (raw_aligned.index <= end)]
 
-        if len(transformed) < controls["window"]:
-            st.warning(
-                f"선택 기간({len(transformed)}거래일)이 롤링 윈도우({controls['window']}일)보다 짧습니다. "
-                "기간을 늘리거나 윈도우를 줄이세요."
-            )
-            return
-
         selected_drivers = [i for i in controls["selected_ids"] if i in transformed.columns]
         if not selected_drivers:
             st.warning("선택한 변수의 유효 데이터가 부족합니다.")
             return
 
-        corr_long = calculate_rolling_correlations(
+        corr_20 = calculate_rolling_correlations(
             transformed,
             target=TARGET_ID,
             drivers=selected_drivers,
-            window=controls["window"],
+            window=20,
         )
-        scored = compute_driver_scores(corr_long)
-        daily = assign_daily_drivers(scored)
-        regimes = compress_driver_regimes(daily)
-        snap = current_driver_snapshot(daily, scored)
-
+        snap = latest_top_driver(corr_20, sig_abs(20))
         driver_id = snap.get("driver_id")
-        chart_corr = corr_long
-        chart_selected = list(selected_drivers)
-        if driver_id and driver_id not in (DRIVER_NONE, DRIVER_MIXED):
-            if driver_id in transformed.columns and driver_id not in chart_selected:
-                chart_selected = chart_selected + [driver_id]
-                chart_corr = calculate_rolling_correlations(
-                    transformed,
-                    target=TARGET_ID,
-                    drivers=chart_selected,
-                    window=controls["window"],
-                )
-
-        ranking_full = build_driver_ranking(scored, as_of_date=transformed.index.max())
-        display_ids = filter_ids_by_min_abs(corr_long, selected_drivers, controls["min_abs"])
-        ranking = ranking_full[ranking_full["instrument_id"].isin(display_ids)].copy() if not ranking_full.empty else ranking_full
-        if not ranking.empty:
-            ranking["rank"] = range(1, len(ranking) + 1)
 
         heatmap_drivers = list(selected_drivers)
         if driver_id and driver_id not in (DRIVER_NONE, DRIVER_MIXED) and driver_id in transformed.columns:
@@ -425,9 +334,11 @@ def main() -> None:
         multi = multi_window_correlations(
             transformed,
             drivers=heatmap_drivers,
-            windows=[20, 60, 120],
-            as_of_date=transformed.index.max(),
+            windows=list(ANALYSIS_WINDOWS),
+            as_of_date=transformed.index.max() if len(transformed) else as_of,
         )
+
+        display_ids = list(selected_drivers)
 
         # --- KPI ---
         usd_raw = raw_aligned[TARGET_ID].dropna() if TARGET_ID in raw_aligned.columns else pd.Series(dtype=float)
@@ -446,99 +357,152 @@ def main() -> None:
 
         c1, c2, c3, c4 = st.columns(4)
         with c1:
-            kpi_card("주도 변수", snap["driver_name"])
+            driver_kpi = "—" if driver_id == DRIVER_NONE else snap["driver_name"]
+            kpi_card("주도 변수", driver_kpi)
         with c2:
             kpi_card("롤링 상관계수", rho_txt)
         with c3:
             kpi_card("USDKRW", format_fx(latest_fx))
         with c4:
             kpi_card("변화량", chg_txt)
-        
+
         with st.expander("분석 기준 보기", expanded=False):
             st.markdown(
                 """
-- Pearson 롤링 상관계수를 사용합니다.
-- 최소 절대 상관계수는 차트, 랭킹, 히트맵, 상세 필터에 적용됩니다.
-- 전일 확정 종가만 사용하며 실시간 현재가는 포함하지 않습니다.
-- 주도 변수는 선택 기간 내 USDKRW와 가장 안정적으로 동행한 변수이며, 인과관계를 의미하지 않습니다.
+- 전일 확정 종가만 사용하며, 실시간 현재가는 포함하지 않습니다.
+- Pearson 롤링 상관계수(20D/60D/120D, min_periods≈80%)를 계산합니다.
+- 높은 상관은 동행을 의미하며, 인과관계를 의미하지 않습니다.
+
+- 전역 상관계수 임계값: 기본값 0.30. 사이드바에서 설정 가능.
+- 윈도우 상관계수 임계값: |20D ρ| ≥ 0.44 / |60D ρ| ≥ 0.25 / |120D ρ| ≥ 0.18.
+
+- [KPI 카드]: |20D ρ| 기준 1위. 윈도우 임계값 이상일 때만 표시.
+- [롤링 상관계수]: 강조는 |ρ| 기준 1위. 차트에 max(전역 임계값, 윈도우 임계값) 이상인 시장변수만 표시.
+- [주도 변수 랭킹]: 시장변수 전체 표시. |20D ρ| 내림차순 정렬.
+- [상관계수 히트맵]: 시장변수 전체 표시. |20D ρ| 내림차순 정렬. max(전역 임계값, 윈도우 임계값) 미만이면 채도 낮춤.
+- [시기별 타임라인]: 일별 주도/혼합 국면 표시. 국면 평균 |ρ|가 윈도우 임계값 미만이면 흐리게 표시.
+- [변수별 상세 분석]: USDKRW와 선택 시장변수의 원본값을 이중축으로 표시.
                 """
             )
 
         # --- Rolling chart ---
-        zoom_years = None
-        if controls["period"] in ("최근 3년", "최근 5년", "전체"):
-            zoom_years = 1.0
-
-        fig, chart_info = rolling_correlation_chart(
-            chart_corr,
-            selected_instruments=selected_drivers,
-            current_driver_id=driver_id if driver_id not in (DRIVER_NONE, DRIVER_MIXED) else None,
-            display_mode=controls["display_mode"],
-            min_abs_correlation=controls["min_abs"],
-            window=controls["window"],
-            initial_zoom_years=zoom_years,
-        )
-        rank_line = build_rank_line(chart_corr, chart_info.get("show_ids") or [])
-
         st.markdown('<div class="fx-section-title">롤링 상관계수</div>', unsafe_allow_html=True)
-        if rank_line:
-            st.caption(rank_line)
-        st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, theme=None)
+        st.caption("최근 롤링 상관계수 기준 상위 N개 시장변수를 표시합니다.")
+
+        if "roll_window_label" not in st.session_state:
+            st.session_state["roll_window_label"] = "20D"
+        if "roll_display_label" not in st.session_state:
+            st.session_state["roll_display_label"] = list(DISPLAY_MODE_LABELS.values())[0]
+
+        _rw = str(st.session_state["roll_window_label"]).replace("일", "").replace("D", "")
+        chart_window = int(_rw)
+        display_mode = {
+            v: k for k, v in DISPLAY_MODE_LABELS.items()
+        }[st.session_state["roll_display_label"]]
+
+        if len(transformed) < chart_window:
+            st.warning(
+                f"선택 기간({len(transformed)}거래일)이 롤링 윈도우({chart_window}일)보다 짧습니다. "
+                "분석 기간을 늘리거나 윈도우를 줄이세요."
+            )
+            chart_corr = pd.DataFrame()
+            chart_info: dict = {"show_ids": []}
+        else:
+            chart_corr = calculate_rolling_correlations(
+                transformed,
+                target=TARGET_ID,
+                drivers=selected_drivers,
+                window=chart_window,
+            )
+            chart_top = latest_top_driver(chart_corr, sig_abs(chart_window))
+            chart_driver_id = chart_top.get("driver_id")
+            chart_selected = list(selected_drivers)
+            if chart_driver_id and chart_driver_id not in (DRIVER_NONE, DRIVER_MIXED):
+                if chart_driver_id in transformed.columns and chart_driver_id not in chart_selected:
+                    chart_selected = chart_selected + [chart_driver_id]
+                    chart_corr = calculate_rolling_correlations(
+                        transformed,
+                        target=TARGET_ID,
+                        drivers=chart_selected,
+                        window=chart_window,
+                    )
+            fig, chart_info = rolling_correlation_chart(
+                chart_corr,
+                selected_instruments=selected_drivers,
+                current_driver_id=(
+                    chart_driver_id if chart_driver_id not in (DRIVER_NONE, DRIVER_MIXED) else None
+                ),
+                display_mode=display_mode,
+                min_abs_correlation=display_floor(chart_window, controls["min_abs"]),
+                window=chart_window,
+            )
+            rank_line = build_rank_line(chart_corr, chart_info.get("show_ids") or [])
+            if rank_line:
+                st.caption(rank_line)
+
+        f1, f2 = st.columns(2)
+        with f1:
+            st.selectbox(
+                "롤링 윈도우",
+                ["20D", "60D", "120D"],
+                key="roll_window_label",
+            )
+        with f2:
+            st.selectbox(
+                "표시 변수",
+                list(DISPLAY_MODE_LABELS.values()),
+                key="roll_display_label",
+            )
+
+        if len(transformed) >= chart_window and not chart_corr.empty:
+            st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, theme=None)
 
         # --- Ranking ---
         st.markdown('<div class="fx-section-title">주도 변수 랭킹</div>', unsafe_allow_html=True)
-        st.caption(
-            f"{controls['window']}일 기준. 전체 시장변수 {len(selected_drivers)}개 중 "
-            f"최소 상관계수(|ρ| ≥ {controls['min_abs']:.2f})를 충족한 시장변수들을 표시합니다."
-        )
-        if ranking.empty:
-            st.info("최소 상관계수 기준을 충족하는 랭킹 변수가 없습니다.")
-        else:
-            show = ranking.reset_index(drop=True).copy()
-            show = show.rename(
-                columns={
-                    "rank": "순위",
-                    "display_name": "시장변수",
-                    "rolling_correlation": "상관계수",
-                    "abs_correlation": "절대 상관계수",
-                    "driver_score": "안정화 점수",
-                    "change_vs_5d": "5일 전 대비 ρ 변화",
-                    "observation_count": "유효 관측치",
+        st.caption("최근 20D/60D/120D 상관계수를 표시하며, 국면 열에 신규/전환/강화/약화/지속을 표시합니다.")
+        rank_rows: list[dict] = []
+        for iid in display_ids:
+            inst = INSTRUMENT_BY_ID.get(iid)
+            if inst is None:
+                continue
+            r20 = _rho_from_multi(multi, iid, 20)
+            r60 = _rho_from_multi(multi, iid, 60)
+            r120 = _rho_from_multi(multi, iid, 120)
+            rank_rows.append(
+                {
+                    "instrument_id": iid,
+                    "시장변수": inst.display_name,
+                    "국면": classify_driver_status(r20, r60, r120),
+                    "20D ρ": r20,
+                    "60D ρ": r60,
+                    "120D ρ": r120,
+                    "_abs20": abs(r20) if pd.notna(r20) else -1.0,
                 }
             )
-            fmt_cols = ["상관계수", "절대 상관계수", "안정화 점수", "5일 전 대비 ρ 변화"]
-            col_order = [
-                "순위",
-                "시장변수",
-                "상관계수",
-                "절대 상관계수",
-                "안정화 점수",
-                "5일 전 대비 ρ 변화",
-                "유효 관측치",
-            ]
+        if not rank_rows:
+            st.info("표시할 랭킹 변수가 없습니다.")
+        else:
+            rank_df = pd.DataFrame(rank_rows).sort_values("_abs20", ascending=False).reset_index(drop=True)
+            rank_df.insert(0, "순위", range(1, len(rank_df) + 1))
             driver_rows = set(
-                show.index[show["instrument_id"] == driver_id].tolist()
+                rank_df.index[rank_df["instrument_id"] == driver_id].tolist()
             ) if driver_id else set()
-
-            def _style_corr(col: pd.Series) -> list[str]:
-                return [corr_color(v) for v in col]
 
             def _row_style(row: pd.Series) -> list[str]:
                 return driver_row_style(row.name in driver_rows, len(row))
 
-            visible = show[col_order]
+            visible = rank_df[["순위", "시장변수", "국면", "20D ρ", "60D ρ", "120D ρ"]]
             styler = (
-                visible.style.format({c: "{:.2f}" for c in fmt_cols}, na_rep="—")
-                .apply(_style_corr, subset=["상관계수"])
-                .apply(_row_style, axis=1)
+                visible.style.format(
+                    {"20D ρ": "{:.2f}", "60D ρ": "{:.2f}", "120D ρ": "{:.2f}"},
+                    na_rep="—",
+                ).apply(_row_style, axis=1)
             )
             st.dataframe(styler, use_container_width=True, hide_index=True)
 
         # --- Heatmap ---
         st.markdown('<div class="fx-section-title">상관계수 히트맵</div>', unsafe_allow_html=True)
-        st.caption(
-            "히트맵 색상은 상관계수의 부호와 크기를 나타내며 호재/악재를 의미하지 않습니다."
-        )
+        st.caption("히트맵 색상은 상관계수의 부호와 크기를 나타내며 호재/악재를 의미하지 않습니다.")
         if multi.empty:
             st.info("히트맵을 그릴 변수가 없습니다.")
         else:
@@ -546,7 +510,7 @@ def main() -> None:
                 correlation_heatmap(
                     multi,
                     current_driver_id=driver_id if driver_id not in (DRIVER_NONE, DRIVER_MIXED) else None,
-                    min_abs_correlation=controls["min_abs"],
+                    user_min_abs=controls["min_abs"],
                 ),
                 use_container_width=True,
                 config=PLOTLY_CONFIG,
@@ -554,161 +518,53 @@ def main() -> None:
             )
 
         # --- Timeline ---
-        st.markdown('<div class="fx-section-title">시기별 주도 변수</div>', unsafe_allow_html=True)
-        st.caption("시기별 주도 변수 판정 결과를 타임라인으로 표시합니다. |ρ|&lt;0.30 구간은 흐리게 표시됩니다.")
-        st.plotly_chart(
-            driver_timeline_chart(regimes, low_confidence_threshold=0.30),
-            use_container_width=True,
-            config=PLOTLY_CONFIG,
-            theme=None,
-        )
-        if not regimes.empty:
-            reg_show = regimes.copy()
-            for _col in ("min_signed_correlation", "max_signed_correlation"):
-                if _col not in reg_show.columns:
-                    reg_show[_col] = np.nan
-            special = reg_show["driver_id"].isin([DRIVER_NONE, DRIVER_MIXED]).to_numpy()
-
-            def _blank_or_rho(series: pd.Series) -> list[str]:
-                out: list[str] = []
-                for i, v in enumerate(series):
-                    if special[i]:
-                        out.append("")
-                    elif pd.isna(v):
-                        out.append("—")
-                    else:
-                        out.append(f"{float(v):.2f}")
-                return out
-
-            reg_show["average_signed_correlation"] = _blank_or_rho(
-                reg_show["average_signed_correlation"]
+        st.markdown('<div class="fx-section-title">시기별 타임라인</div>', unsafe_allow_html=True)
+        st.caption("20D/60D/120D 시기별 주도 변수를 표시합니다. 국면 평균 |ρ|가 윈도우 임계값 이상일 때만 표시합니다.")
+        x_range = [start, end + pd.Timedelta(days=1)]
+        for w, label in zip(ANALYSIS_WINDOWS, ("20D", "60D", "120D")):
+            regimes_w = regimes_for_window(transformed, selected_drivers, w)
+            st.plotly_chart(
+                driver_timeline_chart(
+                    regimes_w,
+                    title=label,
+                    x_range=x_range,
+                    low_confidence_threshold=sig_abs(w),
+                ),
+                use_container_width=True,
+                config=PLOTLY_CONFIG,
+                theme=None,
             )
-            reg_show["average_abs_correlation"] = _blank_or_rho(
-                reg_show["average_abs_correlation"]
-            )
-            reg_show["min_signed_correlation"] = _blank_or_rho(
-                reg_show["min_signed_correlation"]
-            )
-            reg_show["max_signed_correlation"] = _blank_or_rho(
-                reg_show["max_signed_correlation"]
-            )
-            reg_show["start_date"] = pd.to_datetime(reg_show["start_date"]).dt.date
-            reg_show["end_date"] = pd.to_datetime(reg_show["end_date"]).dt.date
-            reg_show = reg_show.rename(
-                columns={
-                    "start_date": "시작일",
-                    "end_date": "종료일",
-                    "trading_days": "지속일",
-                    "driver_name": "시장변수",
-                    "average_signed_correlation": "평균 ρ",
-                    "average_abs_correlation": "평균 |ρ|",
-                    "min_signed_correlation": "최소 ρ",
-                    "max_signed_correlation": "최대 ρ",
-                }
-            )
-            cols = [
-                "시작일",
-                "종료일",
-                "지속일",
-                "시장변수",
-                "평균 ρ",
-                "평균 |ρ|",
-                "최소 ρ",
-                "최대 ρ",
-            ]
-            st.dataframe(reg_show[cols], use_container_width=True, hide_index=True)
 
         # --- Detail ---
         st.markdown('<div class="fx-section-title">변수별 상세 분석</div>', unsafe_allow_html=True)
-        st.caption("USDKRW 원본값, 선택 변수 원본값, 롤링 상관계수, 변환값을 함께 표시합니다.")
-        detail_ids = list(display_ids)
-        if driver_id and driver_id not in (DRIVER_NONE, DRIVER_MIXED) and driver_id in transformed.columns:
-            if driver_id not in detail_ids:
-                detail_ids = [driver_id] + detail_ids
-        detail_map = {
-            INSTRUMENT_BY_ID[i].display_name: i
-            for i in detail_ids
-            if i in INSTRUMENT_BY_ID
-        }
-        if not detail_map:
-            st.info("표시 기준을 충족하는 상세 변수가 없습니다. 최소 |ρ| 기준을 낮춰 보세요.")
+        st.caption("USDKRW와 선택한 변수의 원본값을 비교 표시합니다.")
+        detail_drivers = [d for d in get_driver_instruments() if d.instrument_id in raw_aligned.columns]
+        if not detail_drivers:
+            st.info("표시할 시장변수가 없습니다.")
         else:
-            pick_name = st.selectbox(
-                "상세 변수",
-                list(detail_map.keys()),
-                label_visibility="collapsed",
-            )
-            pick = detail_map[pick_name]
+            detail_names = [d.display_name for d in detail_drivers]
+            pick_name = st.selectbox("비교 변수 선택", detail_names)
+            pick = next(d.instrument_id for d in detail_drivers if d.display_name == pick_name)
             inst = INSTRUMENT_BY_ID[pick]
-
-            src_corr = chart_corr if pick in chart_corr["instrument_id"].values else corr_long
-            pick_corr = src_corr[src_corr["instrument_id"] == pick].set_index("date")["rolling_correlation"]
-
-            y_title = {
-                "log_return": "log return",
-                "diff_bp": "bp change",
-                "level": "flow (원자료 단위)",
-            }.get(inst.transformation, "value")
-            detail_color = _CSS_VARS.get("fx-detail-line", "#3FB950")
-
-            r1c1, r1c2 = st.columns(2)
-            with r1c1:
-                if TARGET_ID in raw_aligned.columns:
-                    st.plotly_chart(
-                        series_line_chart(
-                            raw_aligned[TARGET_ID],
-                            title="USDKRW",
-                            y_title="level",
-                            color=detail_color,
-                        ),
-                        use_container_width=True,
-                        config=PLOTLY_CONFIG,
-                        theme=None,
-                    )
-            with r1c2:
-                if pick in raw_aligned.columns:
-                    st.plotly_chart(
-                        series_line_chart(
-                            raw_aligned[pick],
-                            title=inst.display_name,
-                            y_title="level",
-                            color=detail_color,
-                        ),
-                        use_container_width=True,
-                        config=PLOTLY_CONFIG,
-                        theme=None,
-                    )
-
-            r2c1, r2c2 = st.columns(2)
-            with r2c1:
-                st.plotly_chart(
-                    dual_corr_detail_chart(
-                        pick_corr, inst.display_name, controls["window"], detail_color
-                    ),
-                    use_container_width=True,
-                    config=PLOTLY_CONFIG,
-                    theme=None,
-                )
-            with r2c2:
-                if pick in transformed.columns:
-                    st.plotly_chart(
-                        series_line_chart(
-                            transformed[pick],
-                            title=f"{inst.display_name} 변환값 ({inst.transformation})",
-                            y_title=y_title,
-                            color=detail_color,
-                        ),
-                        use_container_width=True,
-                        config=PLOTLY_CONFIG,
-                        theme=None,
-                    )
+            usd_s = raw_aligned[TARGET_ID] if TARGET_ID in raw_aligned.columns else pd.Series(dtype=float)
+            drv_s = raw_aligned[pick] if pick in raw_aligned.columns else pd.Series(dtype=float)
+            st.plotly_chart(
+                dual_raw_level_chart(
+                    usd_s,
+                    drv_s,
+                    inst.display_name,
+                ),
+                use_container_width=True,
+                config=PLOTLY_CONFIG,
+                theme=None,
+            )
 
             pick_multi = multi[multi["instrument_id"] == pick] if not multi.empty else pd.DataFrame()
             if pick_multi.empty and pick in transformed.columns:
                 pick_multi = multi_window_correlations(
                     transformed,
                     drivers=[pick],
-                    windows=[20, 60, 120],
+                    windows=list(ANALYSIS_WINDOWS),
                     as_of_date=transformed.index.max(),
                 )
             m20 = m60 = m120 = np.nan
@@ -720,11 +576,9 @@ def main() -> None:
                 elif int(r["window"]) == 120:
                     m120 = r["rolling_correlation"]
 
-            series_t = transformed[pick] if pick in transformed.columns else pd.Series(dtype=float)
-            corr_s = pick_corr.dropna()
+            corr_s = corr_20[corr_20["instrument_id"] == pick].set_index("date")["rolling_correlation"].dropna()
             min_idx = corr_s.idxmin() if len(corr_s) else None
             max_idx = corr_s.idxmax() if len(corr_s) else None
-
             avg_rho = format_corr(float(corr_s.mean()) if len(corr_s) else np.nan)
             avg_abs_rho = format_corr(float(corr_s.abs().mean()) if len(corr_s) else np.nan)
             min_rho = format_corr(float(corr_s.min()) if len(corr_s) else np.nan)
@@ -738,8 +592,8 @@ def main() -> None:
 <li>20D ρ: {format_corr(m20)}</li>
 <li>60D ρ: {format_corr(m60)}</li>
 <li>120D ρ: {format_corr(m120)}</li>
-<li>평균 ρ: {avg_rho}</li>
 <li>평균 |ρ|: {avg_abs_rho}</li>
+<li>평균 ρ: {avg_rho}</li>
 <li>최소 ρ: {min_rho} ({min_date})</li>
 <li>최대 ρ: {max_rho} ({max_date})</li>
 </ul>
@@ -748,10 +602,9 @@ def main() -> None:
                 unsafe_allow_html=True,
             )
 
-        # --- Data quality ---
         with st.expander("데이터 품질"):
             st.markdown("**변수별 데이터 품질**")
-            st.caption(f"데이터 커버리지 확인을 위해 변수별 데이터 품질을 표시합니다.")
+            st.caption("데이터 커버리지 확인을 위해 변수별 데이터 품질을 표시합니다.")
             meta_rows = []
             for iid, m in frame["meta"].items():
                 meta_rows.append(
@@ -770,11 +623,14 @@ def main() -> None:
                     use_container_width=True,
                     hide_index=True,
                 )
-            last_ing = status.get("last_ingestion") or {}
 
             abnormal = detect_abnormal_returns(transformed, raw_aligned)
             st.markdown("**비정상 수익률/금리 변화 후보**")
-            st.caption("|로그수익률|>10%, |VIX|>50%, |금리변화|>50bp 기준을 초과하는 일간 관측치를 표시합니다.")
+            st.caption(
+                f"|로그수익률|>{ABNORMAL_LOG_RETURN:.0%}, "
+                f"|VIX|>{ABNORMAL_VIX_LOG_RETURN:.0%}, "
+                f"|금리변화|>{ABNORMAL_YIELD_BP:.0f}bp 기준을 초과하는 일간 관측치를 표시합니다."
+            )
             if abnormal.empty:
                 st.caption("기준을 초과하는 관측치가 없습니다.")
             else:

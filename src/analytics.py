@@ -9,18 +9,24 @@ import numpy as np
 import pandas as pd
 
 from config.instruments import INSTRUMENT_BY_ID, TARGET_ID
+from config.thresholds import (
+    ABNORMAL_LOG_RETURN,
+    ABNORMAL_VIX_LOG_RETURN,
+    ABNORMAL_YIELD_BP,
+    ANALYSIS_WINDOWS,
+    MIN_PERIOD_RATIO,
+    MIXED_SCORE_GAP,
+    STATUS_ABS_DELTA,
+    sig_abs,
+)
 
 DRIVER_NONE = "NONE"
 DRIVER_MIXED = "MIXED"
 DRIVER_NONE_NAME = "없음"
 DRIVER_MIXED_NAME = "혼합"
 
-MIN_DRIVER_SCORE = 0.30
-MIXED_SCORE_GAP = 0.05
-SCORE_WINDOW = 5
 
-
-def min_periods_for_window(window: int, min_period_ratio: float = 0.8) -> int:
+def min_periods_for_window(window: int, min_period_ratio: float = MIN_PERIOD_RATIO) -> int:
     return int(math.ceil(window * min_period_ratio))
 
 
@@ -29,7 +35,7 @@ def calculate_rolling_correlations(
     target: str = TARGET_ID,
     drivers: list[str] | None = None,
     window: int = 20,
-    min_period_ratio: float = 0.8,
+    min_period_ratio: float = MIN_PERIOD_RATIO,
 ) -> pd.DataFrame:
     if transformed_df.empty:
         return pd.DataFrame(
@@ -44,7 +50,7 @@ def calculate_rolling_correlations(
         )
 
     if target not in transformed_df.columns:
-        raise ValueError(f"Target '{target}' not in transformed dataframe")
+        raise ValueError(f"시장변수 '{target}'가 변환된 데이터프레임에 없습니다.")
 
     if drivers is None:
         drivers = [c for c in transformed_df.columns if c != target]
@@ -96,28 +102,6 @@ def calculate_rolling_correlations(
     return out
 
 
-def compute_driver_scores(
-    corr_long: pd.DataFrame,
-    score_window: int = SCORE_WINDOW,
-) -> pd.DataFrame:
-    if corr_long.empty:
-        return corr_long.copy()
-
-    df = corr_long.sort_values(["instrument_id", "date"]).copy()
-    scores = []
-    for iid, grp in df.groupby("instrument_id", sort=False):
-        g = grp.sort_values("date")
-        score = (
-            g["abs_correlation"]
-            .rolling(window=score_window, min_periods=1)
-            .median()
-        )
-        tmp = g.copy()
-        tmp["driver_score"] = score
-        scores.append(tmp)
-    return pd.concat(scores, ignore_index=True)
-
-
 def _display_for_driver(driver_id: str) -> str:
     if driver_id == DRIVER_NONE:
         return DRIVER_NONE_NAME
@@ -130,11 +114,11 @@ def _display_for_driver(driver_id: str) -> str:
 
 
 def assign_daily_drivers(
-    scored_corr: pd.DataFrame,
-    min_score: float = MIN_DRIVER_SCORE,
+    corr_long: pd.DataFrame,
+    min_score: float,
     mixed_gap: float = MIXED_SCORE_GAP,
 ) -> pd.DataFrame:
-    if scored_corr.empty:
+    if corr_long.empty:
         return pd.DataFrame(
             columns=[
                 "date",
@@ -142,13 +126,12 @@ def assign_daily_drivers(
                 "driver_name",
                 "signed_correlation",
                 "abs_correlation",
-                "driver_score",
             ]
         )
 
     records: list[dict[str, Any]] = []
-    for dt, grp in scored_corr.groupby("date"):
-        valid = grp.dropna(subset=["driver_score"]).copy()
+    for dt, grp in corr_long.groupby("date"):
+        valid = grp.dropna(subset=["abs_correlation"]).copy()
         if valid.empty:
             records.append(
                 {
@@ -157,37 +140,33 @@ def assign_daily_drivers(
                     "driver_name": DRIVER_NONE_NAME,
                     "signed_correlation": np.nan,
                     "abs_correlation": np.nan,
-                    "driver_score": np.nan,
                 }
             )
             continue
 
-        valid = valid.sort_values("driver_score", ascending=False)
+        valid = valid.sort_values("abs_correlation", ascending=False)
         top = valid.iloc[0]
-        top_score = float(top["driver_score"])
+        top_abs = float(top["abs_correlation"])
         second = valid.iloc[1] if len(valid) > 1 else None
-        second_score = float(second["driver_score"]) if second is not None else -np.inf
+        second_abs = float(second["abs_correlation"]) if second is not None else -np.inf
 
-        if top_score < min_score:
+        if top_abs < min_score:
             driver_id = DRIVER_NONE
             name = DRIVER_NONE_NAME
             signed = np.nan
             abs_c = np.nan
-            score = top_score
-        elif (top_score - second_score) < mixed_gap and second is not None:
+        elif (top_abs - second_abs) < mixed_gap and second is not None:
             driver_id = DRIVER_MIXED
             n1 = str(top["display_name"])
             n2 = str(second["display_name"])
             name = f"혼합({n1}, {n2})"
             signed = np.nan
             abs_c = np.nan
-            score = top_score
         else:
             driver_id = str(top["instrument_id"])
             name = _display_for_driver(driver_id)
             signed = float(top["rolling_correlation"]) if pd.notna(top["rolling_correlation"]) else np.nan
-            abs_c = float(top["abs_correlation"]) if pd.notna(top["abs_correlation"]) else np.nan
-            score = top_score
+            abs_c = top_abs
 
         records.append(
             {
@@ -196,11 +175,43 @@ def assign_daily_drivers(
                 "driver_name": name,
                 "signed_correlation": signed,
                 "abs_correlation": abs_c,
-                "driver_score": score,
             }
         )
 
     return pd.DataFrame(records).sort_values("date").reset_index(drop=True)
+
+
+def latest_top_driver(corr_long: pd.DataFrame, min_abs: float) -> dict[str, Any]:
+    empty = {
+        "driver_id": DRIVER_NONE,
+        "driver_name": DRIVER_NONE_NAME,
+        "signed_correlation": np.nan,
+        "abs_correlation": np.nan,
+    }
+    if corr_long is None or corr_long.empty:
+        return empty
+
+    df = corr_long.copy()
+    df["date"] = pd.to_datetime(df["date"])
+    as_of = df["date"].max()
+    snap = df[df["date"] == as_of].dropna(subset=["abs_correlation"])
+    if snap.empty:
+        return empty
+
+    top = snap.sort_values("abs_correlation", ascending=False).iloc[0]
+    top_abs = float(top["abs_correlation"])
+    if top_abs < float(min_abs):
+        return empty
+
+    did = str(top["instrument_id"])
+    return {
+        "driver_id": did,
+        "driver_name": _display_for_driver(did),
+        "signed_correlation": (
+            float(top["rolling_correlation"]) if pd.notna(top["rolling_correlation"]) else np.nan
+        ),
+        "abs_correlation": top_abs,
+    }
 
 
 def _absorb_single_day_regimes(daily: pd.DataFrame) -> pd.DataFrame:
@@ -208,9 +219,9 @@ def _absorb_single_day_regimes(daily: pd.DataFrame) -> pd.DataFrame:
         return daily.copy()
 
     out = daily.sort_values("date").reset_index(drop=True).copy()
-    orig_ids = out["driver_id"].tolist()
     old_names = out["driver_name"].tolist()
-    ids = list(orig_ids)
+    ids = list(out["driver_id"].tolist())
+    name_src = list(range(len(ids)))
 
     i = 0
     while i < len(ids):
@@ -219,27 +230,87 @@ def _absorb_single_day_regimes(daily: pd.DataFrame) -> pd.DataFrame:
             j += 1
         run_len = j - i + 1
         if run_len == 1:
-            prev_id = ids[i - 1] if i > 0 else None
-            next_id = ids[i + 1] if i + 1 < len(ids) else None
-            if prev_id is not None and next_id is not None and prev_id == next_id:
-                ids[i] = prev_id
-            elif prev_id is not None and next_id is not None and prev_id != next_id:
-                ids[i] = DRIVER_MIXED
-            elif prev_id is not None and next_id is None:
-                ids[i] = prev_id
-            elif prev_id is None and next_id is not None:
-                ids[i] = next_id
+            if i > 0:
+                ids[i] = ids[i - 1]
+                name_src[i] = name_src[i - 1]
+            elif i + 1 < len(ids):
+                ids[i] = ids[i + 1]
+                name_src[i] = i + 1
         i = j + 1
 
-    names = []
-    for i, did in enumerate(ids):
-        if did == orig_ids[i]:
-            names.append(old_names[i])
-        else:
-            names.append(_display_for_driver(did))
+    names = [old_names[name_src[k]] for k in range(len(ids))]
     out["driver_id"] = ids
     out["driver_name"] = names
     return out
+
+
+def regimes_for_window(
+    transformed_df: pd.DataFrame,
+    drivers: list[str],
+    window: int,
+    target: str = TARGET_ID,
+) -> pd.DataFrame:
+    corr = calculate_rolling_correlations(
+        transformed_df,
+        target=target,
+        drivers=drivers,
+        window=window,
+    )
+    daily = assign_daily_drivers(corr, min_score=sig_abs(window))
+    return compress_driver_regimes(daily)
+
+
+def _corr_sign(value: float) -> int | None:
+    if pd.isna(value) or float(value) == 0.0:
+        return None
+    return 1 if float(value) > 0 else -1
+
+
+def classify_driver_status(
+    rho_20: float,
+    rho_60: float,
+    rho_120: float,
+) -> str:
+    s20_floor = sig_abs(20)
+    s60_floor = sig_abs(60)
+    s120_floor = sig_abs(120)
+
+    if pd.isna(rho_20) or abs(float(rho_20)) < s20_floor:
+        return "—"
+
+    a20 = abs(float(rho_20))
+    a60 = abs(float(rho_60)) if pd.notna(rho_60) else 0.0
+    a120 = abs(float(rho_120)) if pd.notna(rho_120) else 0.0
+    s20 = _corr_sign(rho_20)
+    s60 = _corr_sign(rho_60) if pd.notna(rho_60) else None
+    s120 = _corr_sign(rho_120) if pd.notna(rho_120) else None
+
+    if a60 < s60_floor and a120 < s120_floor:
+        return "신규"
+
+    if s20 is not None and s60 is not None and s20 != s60 and a60 >= s60_floor:
+        return "전환"
+    if (
+        s20 is not None
+        and s60 is not None
+        and s120 is not None
+        and s20 == s60
+        and s20 != s120
+        and a60 >= s60_floor
+        and a120 >= s120_floor
+    ):
+        return "전환"
+
+    if s20 is not None and s60 is not None and s20 == s60:
+        same_or_weak_120 = s120 == s20 or a120 < s120_floor
+        if a20 - a60 >= STATUS_ABS_DELTA and same_or_weak_120:
+            return "강화"
+        if a60 - a20 >= STATUS_ABS_DELTA and same_or_weak_120:
+            return "약화"
+        if abs(a20 - a60) < STATUS_ABS_DELTA:
+            return "지속"
+
+    return "—"
 
 
 def compress_driver_regimes(daily_drivers: pd.DataFrame) -> pd.DataFrame:
@@ -307,7 +378,7 @@ def _finalize_regime(current: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_driver_ranking(
-    scored_corr: pd.DataFrame,
+    corr_long: pd.DataFrame,
     as_of_date: pd.Timestamp | None = None,
     lag_days: int = 5,
 ) -> pd.DataFrame:
@@ -317,14 +388,13 @@ def build_driver_ranking(
         "display_name",
         "rolling_correlation",
         "abs_correlation",
-        "driver_score",
         "change_vs_5d",
         "observation_count",
     ]
-    if scored_corr.empty:
+    if corr_long.empty:
         return pd.DataFrame(columns=empty_cols)
 
-    df = scored_corr.copy()
+    df = corr_long.copy()
     df["date"] = pd.to_datetime(df["date"])
     if as_of_date is None:
         as_of = df["date"].max()
@@ -369,9 +439,9 @@ def multi_window_correlations(
     windows: list[int] | None = None,
     target: str = TARGET_ID,
     as_of_date: pd.Timestamp | None = None,
-    min_period_ratio: float = 0.8,
+    min_period_ratio: float = MIN_PERIOD_RATIO,
 ) -> pd.DataFrame:
-    windows = windows or [20, 60, 120]
+    windows = list(windows) if windows is not None else list(ANALYSIS_WINDOWS)
     if as_of_date is None:
         as_of = transformed_df.index.max()
     else:
@@ -401,61 +471,6 @@ def multi_window_correlations(
     return pd.DataFrame(records)
 
 
-def current_driver_snapshot(
-    daily_drivers: pd.DataFrame,
-    scored_corr: pd.DataFrame,
-) -> dict[str, Any]:
-    empty = {
-        "driver_id": DRIVER_NONE,
-        "driver_name": DRIVER_NONE_NAME,
-        "signed_correlation": np.nan,
-        "abs_correlation": np.nan,
-        "driver_score": np.nan,
-        "previous_driver_id": None,
-        "previous_driver_name": None,
-        "regime_start": None,
-        "regime_days": 0,
-    }
-    if daily_drivers.empty:
-        return empty
-
-    d = daily_drivers.sort_values("date")
-    latest = d.iloc[-1]
-    current_id = latest["driver_id"]
-
-    regime_start = latest["date"]
-    regime_days = 1
-    for i in range(len(d) - 2, -1, -1):
-        if d.iloc[i]["driver_id"] == current_id:
-            regime_start = d.iloc[i]["date"]
-            regime_days += 1
-        else:
-            break
-
-    prev_row = d.iloc[len(d) - regime_days - 1] if len(d) > regime_days else None
-
-    score = latest["driver_score"]
-    if current_id not in (DRIVER_NONE, DRIVER_MIXED) and not scored_corr.empty:
-        match = scored_corr[
-            (scored_corr["date"] == latest["date"])
-            & (scored_corr["instrument_id"] == current_id)
-        ]
-        if not match.empty:
-            score = match.iloc[0]["driver_score"]
-
-    return {
-        "driver_id": current_id,
-        "driver_name": latest["driver_name"],
-        "signed_correlation": latest["signed_correlation"],
-        "abs_correlation": latest["abs_correlation"],
-        "driver_score": float(score) if pd.notna(score) else np.nan,
-        "previous_driver_id": prev_row["driver_id"] if prev_row is not None else None,
-        "previous_driver_name": prev_row["driver_name"] if prev_row is not None else None,
-        "regime_start": pd.Timestamp(regime_start).date().isoformat(),
-        "regime_days": regime_days,
-    }
-
-
 def detect_abnormal_returns(
     transformed_wide: pd.DataFrame,
     raw_aligned_wide: pd.DataFrame | None = None,
@@ -473,15 +488,15 @@ def detect_abnormal_returns(
             continue
 
         if inst.transformation == "diff_bp":
-            thresh = 50.0
+            thresh = ABNORMAL_YIELD_BP
             mask = s.abs() > thresh
             unit = "bp"
         elif iid == "VIX":
-            thresh = 0.50
+            thresh = ABNORMAL_VIX_LOG_RETURN
             mask = s.abs() > thresh
             unit = "log_return"
         elif inst.transformation == "log_return":
-            thresh = 0.10
+            thresh = ABNORMAL_LOG_RETURN
             mask = s.abs() > thresh
             unit = "log_return"
         else:

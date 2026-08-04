@@ -1,9 +1,26 @@
-"""Instrument metadata and fixed chart colors for FXCorrMonitor."""
+"""Instrument metadata for FXCorrMonitor. Series colors come from styles.css."""
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from typing import Any
+
+from src.theme import load_css_vars
+
+_CSS = load_css_vars()
+
+
+def _tok(name: str) -> str:
+    if name not in _CSS:
+        raise KeyError(f"missing CSS token --{name}")
+    return _CSS[name]
+
+
+def css_instrument_color(instrument_id: str) -> str:
+    key = f"fx-color-{instrument_id}"
+    if key in _CSS:
+        return _CSS[key]
+    return _tok("fx-inst-fallback")
 
 
 @dataclass(frozen=True)
@@ -17,11 +34,11 @@ class Instrument:
     transformation: str
     alignment: str
     active: bool = True
-    color: str = "#7F8C9B"
+    color: str = ""
 
 
-NONE_COLOR = "#D0D7DE"
-MIXED_COLOR = "#6E7681"
+NONE_COLOR = _tok("fx-color-NONE")
+MIXED_COLOR = _tok("fx-color-MIXED")
 SPECIAL_COLORS = {
     "NONE": NONE_COLOR,
     "MIXED": MIXED_COLOR,
@@ -70,7 +87,7 @@ INSTRUMENTS: list[Instrument] = [
         data_type="price",
         transformation="log_return",
         alignment="same_day",
-        color="#DB6D28",
+        color="#F0883E",
     ),
     Instrument(
         instrument_id="EURUSD",
@@ -81,7 +98,7 @@ INSTRUMENTS: list[Instrument] = [
         data_type="price",
         transformation="log_return",
         alignment="same_day",
-        color="#BF8700",
+        color="#DB61A2",
     ),
     Instrument(
         instrument_id="KOSPI",
@@ -103,7 +120,7 @@ INSTRUMENTS: list[Instrument] = [
         data_type="flow",
         transformation="level",
         alignment="same_day",
-        color="#56D364",
+        color="#F0C14A",
     ),
     Instrument(
         instrument_id="SPX",
@@ -114,7 +131,6 @@ INSTRUMENTS: list[Instrument] = [
         data_type="price",
         transformation="log_return",
         alignment="previous_us_close",
-        active=True,
         color="#58A6FF",
     ),
     Instrument(
@@ -192,7 +208,7 @@ INSTRUMENTS: list[Instrument] = [
         data_type="yield",
         transformation="diff_bp",
         alignment="same_day",
-        color="#8B949E",
+        color="#C084FC",
     ),
     Instrument(
         instrument_id="KTB10Y",
@@ -203,7 +219,7 @@ INSTRUMENTS: list[Instrument] = [
         data_type="yield",
         transformation="diff_bp",
         alignment="same_day",
-        color="#F0C14A",
+        color="#E879F9",
     ),
 ]
 
@@ -254,4 +270,4 @@ def instrument_to_row(instrument: Instrument, updated_at: str) -> dict[str, Any]
 
 
 def color_for(instrument_id: str) -> str:
-    return INSTRUMENT_COLORS.get(instrument_id, "#7F8C9B")
+    return INSTRUMENT_COLORS.get(instrument_id) or css_instrument_color(instrument_id)

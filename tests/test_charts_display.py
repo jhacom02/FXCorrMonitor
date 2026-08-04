@@ -126,7 +126,7 @@ def test_correlation_heatmap_builds_with_labels_and_desaturate():
                 }
             )
     multi = pd.DataFrame(rows)
-    fig = correlation_heatmap(multi, current_driver_id="KOSPI", min_abs_correlation=0.30)
+    fig = correlation_heatmap(multi, current_driver_id="KOSPI", user_min_abs=0.30)
     assert len(fig.data) == 1
     hm = fig.data[0]
     assert list(hm.x) == ["20D", "60D", "120D"]

@@ -1,5 +1,7 @@
-/* FXCorrMonitor — single stylesheet
-   Absolute colors live only in :root. app.py / charts.py parse these tokens. */
+/* FXCorrMonitor — single stylesheet.
+   Absolute colors live only in :root; Python reads via load_css_vars().
+   .streamlit/config.toml theme ↔ --fx-accent / --fx-chart-paper /
+   --fx-chart-plot / --fx-chart-font (Streamlit boot; keep in sync). */
 
 :root {
   --fx-accent: #58A6FF;
@@ -25,6 +27,7 @@
   --fx-chart-hline-strong: #4A5568;
   --fx-chart-hline-soft: #3D4A5C;
   --fx-chart-band: rgba(88, 166, 255, 0.035);
+  --fx-chart-hover-bg: rgba(22, 27, 34, 0.75);
   --fx-heatmap-paper: #131820;
   --fx-heatmap-n1: #2F7FD4;
   --fx-heatmap-n05: #5A9FD4;
@@ -32,6 +35,27 @@
   --fx-heatmap-p05: #D47868;
   --fx-heatmap-p1: #E24B4B;
   --fx-detail-line: #3FB950;
+  --fx-detail-driver-line: #79C0FF;
+  --fx-inst-fallback: #7F8C9B;
+  --fx-timeline-invalid: #6E7681;
+  --fx-color-NONE: #D0D7DE;
+  --fx-color-MIXED: #6E7681;
+  --fx-color-USDKRW: #E6EDF3;
+  --fx-color-DXY: #F85149;
+  --fx-color-USDJPY: #FF7B72;
+  --fx-color-USDCNH: #DB6D28;
+  --fx-color-EURUSD: #BF8700;
+  --fx-color-KOSPI: #3FB950;
+  --fx-color-F_NET: #2DD4BF;
+  --fx-color-SPX: #58A6FF;
+  --fx-color-NDX: #1F6FEB;
+  --fx-color-VIX: #A371F7;
+  --fx-color-WTI: #D29922;
+  --fx-color-GOLD: #E3B341;
+  --fx-color-UST2Y: #39C5CF;
+  --fx-color-UST10Y: #00A6A6;
+  --fx-color-KTB3Y: #C084FC;
+  --fx-color-KTB10Y: #A855F7;
 }
 
 [data-testid="stSidebar"] {
@@ -91,7 +115,7 @@ div[data-testid="stDecoration"] {
 
 .fx-meta-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.4rem 1rem;
 }
 

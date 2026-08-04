@@ -51,15 +51,12 @@ python main.py ingest --file "data/raw/infomax_raw.xlsx"
 
 ```bash
 streamlit run app/app.py
-```
-
-접속: [http://localhost:8502](http://localhost:8502) (`.streamlit/config.toml`에서 포트·다크 테마 고정)
-
-또는:
-
-```bash
+# 또는
 python main.py run
 ```
+
+- 로컬: [http://localhost:8502](http://localhost:8502)
+- 사내망: `http://<서버IP>:8502` (`.streamlit/config.toml`에서 `address = "0.0.0.0"`, 포트 8502·방화벽 인바운드 필요)
 
 테스트:
 
@@ -102,7 +99,7 @@ pytest
 
 화면: 상단 상태 배너(분석 기준일·확정 종가·최종 적재) → KPI → 롤링 상관 차트 → 랭킹 → 히트맵 → 주도 변수 타임라인 → 변수 상세 → 데이터 품질
 
-기본 화면은 최신 절대 롤링 상관계수 상위 5개와 |ρ| ≥ 0.30인 변수만 표시하며, 해당 기준은 분석 계산이 아닌 화면 표시 필터로만 적용된다.
+기본 화면의 공통 표시 필터는 사이드바 `|ρ|`(기본 0.30)이다. 롤링 차트·히트맵은 `max(사이드바, 윈도우별 통계 유의선)`을 쓴다 (20D 0.44 / 60D 0.25 / 120D 0.18). 주도 변수 랭킹은 사이드바 임계 없이 선택 변수 전체를 `|20D ρ|` 순으로 표시한다. KPI·차트 굵은 선·주도 국면·타임라인 흐림·상태 열은 `sig_abs(W)`만 사용한다. KPI는 항상 20D 당일 `|ρ|` 1위(≥0.44). 임계는 [`config/thresholds.py`](config/thresholds.py)에서 관리한다.
 
 ## 테스트 구조
 
@@ -136,11 +133,10 @@ pytest
 
 ## 주도 변수 표시 원칙
 
-1. `driver_score` = 최근 5거래일 `abs(corr)` 중앙값
-2. 1위 점수 &lt; 0.30 → 없음
-3. 1·2위 격차 &lt; 0.05 → 혼합(변수1, 변수2)
-4. 그 외 1위 변수
-5. 1거래일짜리 구간은 가능하면 인접 국면에 흡수
+1. KPI·롤링 차트 강조: 당일 롤링 `|ρ|` 1위 (`latest_top_driver`; 혼합 없음). KPI는 20D 고정.
+2. 1위 `|ρ|` &lt; `sig_abs(W)` (20D 0.44 / 60D 0.25 / 120D 0.18) → 없음(—)
+3. 시기별 타임라인만 일별 배정+국면 압축: 1·2위 격차 &lt; 0.05 → 혼합; 1거래일 구간은 직전 국면으로 연장(맨 앞만 직후)
+4. 그 외(타임라인) 1위 변수
 
 화면에는 항상 “상관관계는 인과관계를 의미하지 않는다”는 주석을 표시합니다.
 
@@ -152,6 +148,7 @@ FXCorrMonitor/
 ├─ app/app.py
 ├─ app/styles.css
 ├─ config/instruments.py
+├─ config/thresholds.py
 ├─ data/raw/
 ├─ scripts/ingest_excel.py
 ├─ src/

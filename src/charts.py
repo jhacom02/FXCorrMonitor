@@ -9,19 +9,28 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from config.instruments import INSTRUMENT_BY_ID, SPECIAL_COLORS, color_for
+from config.thresholds import CORR_GUIDE_SOFT, CORR_GUIDE_STRONG, display_floor
 from src.theme import load_css_vars
 
 _CSS = load_css_vars()
 
 
-def _tok(name: str, fallback: str) -> str:
-    return _CSS.get(name, fallback)
+def _tok(name: str) -> str:
+    if name not in _CSS:
+        raise KeyError(f"missing CSS token --{name}")
+    return _CSS[name]
 
 
 CHART_LAYOUT = dict(
-    paper_bgcolor=_tok("fx-chart-paper", "#0E1117"),
-    plot_bgcolor=_tok("fx-chart-plot", "#161B22"),
-    font=dict(color=_tok("fx-chart-font", "#E6EDF3"), size=12),
+    paper_bgcolor=_tok("fx-chart-paper"),
+    plot_bgcolor=_tok("fx-chart-plot"),
+    font=dict(color=_tok("fx-chart-font"), size=12),
+    hoverlabel=dict(
+        bgcolor=_tok("fx-chart-plot"),
+        bordercolor=_tok("fx-chart-grid"),
+        font=dict(color=_tok("fx-chart-font"), size=12),
+        namelength=-1,
+    ),
 )
 
 DISPLAY_MODE_TOP3 = "top_3"
@@ -48,11 +57,11 @@ PLOTLY_CONFIG = {
 }
 
 HEATMAP_COLORSCALE = [
-    [0.0, _tok("fx-heatmap-n1", "#2F7FD4")],
-    [0.25, _tok("fx-heatmap-n05", "#5A9FD4")],
-    [0.5, _tok("fx-heatmap-0", "#343C48")],
-    [0.75, _tok("fx-heatmap-p05", "#D47868")],
-    [1.0, _tok("fx-heatmap-p1", "#E24B4B")],
+    [0.0, _tok("fx-heatmap-n1")],
+    [0.25, _tok("fx-heatmap-n05")],
+    [0.5, _tok("fx-heatmap-0")],
+    [0.75, _tok("fx-heatmap-p05")],
+    [1.0, _tok("fx-heatmap-p1")],
 ]
 
 
@@ -65,7 +74,7 @@ def _empty_message_fig(message: str, height: int = 420) -> go.Figure:
         x=0.5,
         y=0.5,
         showarrow=False,
-        font=dict(color=_tok("fx-chart-muted", "#9DA7B3"), size=14),
+        font=dict(color=_tok("fx-chart-muted"), size=14),
     )
     fig.update_layout(
         **CHART_LAYOUT,
@@ -93,14 +102,14 @@ def resolve_chart_instruments(
     selected_instruments: list[str],
     current_driver_id: str | None,
     display_mode: str = DISPLAY_MODE_TOP5,
-    min_abs_correlation: float = 0.30,
+    min_abs_correlation: float = 0.0,
 ) -> dict[str, Any]:
     special = {"NONE", "MIXED", None, ""}
     driver_id = current_driver_id if current_driver_id not in special else None
 
     selected = [i for i in selected_instruments if i]
     ranking = _latest_abs_ranking(corr_long, selected)
-    passed = ranking[ranking["abs_correlation"] >= min_abs_correlation].copy()
+    passed = ranking[ranking["abs_correlation"] >= float(min_abs_correlation)].copy()
 
     n_cap = None
     if display_mode == DISPLAY_MODE_TOP3:
@@ -179,7 +188,7 @@ def build_rank_line(
         mark = circles[i] if i < len(circles) else f"{i + 1}."
         abs_v = float(row.abs_correlation)
         parts.append(f"{mark} {row.display_name} ({abs_v:.2f})")
-    return "상관계수 순위: " + ",  ".join(parts)
+    return f"상관계수 순위: " + ",  ".join(parts)
 
 
 def rolling_correlation_chart(
@@ -187,7 +196,7 @@ def rolling_correlation_chart(
     selected_instruments: list[str],
     current_driver_id: str | None,
     display_mode: str = DISPLAY_MODE_TOP5,
-    min_abs_correlation: float = 0.30,
+    min_abs_correlation: float = 0.0,
     color_map: dict[str, str] | None = None,
     window: int = 20,
     title: str | None = None,
@@ -294,37 +303,40 @@ def rolling_correlation_chart(
                 text=[f"{dname}  {sign}{val:.2f}"],
                 textposition="middle right",
                 textfont=dict(color=dcolor, size=12),
-                marker=dict(size=9, color=dcolor, line=dict(width=1, color=_tok("fx-chart-font", "#E6EDF3"))),
+                marker=dict(size=9, color=dcolor, line=dict(width=1, color=_tok("fx-chart-font"))),
                 showlegend=False,
                 hovertemplate=f"{dname}: {val:.2f}<extra></extra>",
             )
         )
 
-    for y0, y1 in [(0.7, 1.0), (-1.0, -0.7)]:
+    for y0, y1 in [
+        (CORR_GUIDE_STRONG, 1.0),
+        (-1.0, -CORR_GUIDE_STRONG),
+    ]:
         fig.add_hrect(
             y0=y0,
             y1=y1,
-            fillcolor=_tok("fx-chart-band", "rgba(88, 166, 255, 0.035)"),
+            fillcolor=_tok("fx-chart-band"),
             line_width=0,
             layer="below",
         )
 
-    grid = _tok("fx-chart-grid", "#2A3441")
-    for y in (0, 0.3, -0.3, 0.7, -0.7):
+    grid = _tok("fx-chart-grid")
+    for y in (0, CORR_GUIDE_SOFT, -CORR_GUIDE_SOFT, CORR_GUIDE_STRONG, -CORR_GUIDE_STRONG):
         if y == 0:
             fig.add_hline(y=y, line_dash="solid", line_color=grid, line_width=1.2)
-        elif abs(y) == 0.7:
+        elif abs(y) == CORR_GUIDE_STRONG:
             fig.add_hline(
                 y=y,
                 line_dash="dot",
-                line_color=_tok("fx-chart-hline-strong", "#4A5568"),
+                line_color=_tok("fx-chart-hline-strong"),
                 line_width=1.4,
             )
         else:
             fig.add_hline(
                 y=y,
                 line_dash="dot",
-                line_color=_tok("fx-chart-hline-soft", "#3D4A5C"),
+                line_color=_tok("fx-chart-hline-soft"),
                 line_width=1,
             )
 
@@ -335,7 +347,7 @@ def rolling_correlation_chart(
         xanchor="right",
         x=1,
         font=dict(size=11),
-        bgcolor="rgba(22, 27, 34, 0.75)",
+        bgcolor=_tok("fx-chart-hover-bg"),
         borderwidth=0,
     )
     margin = dict(l=40, r=40, t=20, b=40)
@@ -370,7 +382,8 @@ def correlation_heatmap(
     multi_corr: pd.DataFrame,
     height: int = 480,
     current_driver_id: str | None = None,
-    min_abs_correlation: float = 0.30,
+    min_abs_by_window: dict[int, float] | None = None,
+    user_min_abs: float = 0.0,
     desaturate_factor: float = 0.6,
 ) -> go.Figure:
     if multi_corr is None or multi_corr.empty:
@@ -407,10 +420,21 @@ def correlation_heatmap(
         display_names.append(name)
         y_labels.append(name)
 
+    floors = min_abs_by_window or {
+        20: display_floor(20, user_min_abs),
+        60: display_floor(60, user_min_abs),
+        120: display_floor(120, user_min_abs),
+    }
+    col_floors = [
+        float(floors.get(int(c.replace("D", "")), 0.0)) for c in cols
+    ]
+
     z = np.asarray(pivot.values, dtype=float)
     display_z = z.copy()
     finite = np.isfinite(z)
-    low_mask = finite & (np.abs(z) < min_abs_correlation)
+    low_mask = np.zeros_like(z, dtype=bool)
+    for j, floor in enumerate(col_floors):
+        low_mask[:, j] = finite[:, j] & (np.abs(z[:, j]) < floor)
     display_z[low_mask] = z[low_mask] * desaturate_factor
 
     n_rows, n_cols = z.shape
@@ -450,34 +474,36 @@ def correlation_heatmap(
             ygap=1,
             text=text,
             texttemplate="%{text}",
-            textfont=dict(color=_tok("fx-chart-font", "#E6EDF3"), size=12),
+            textfont=dict(color=_tok("fx-chart-font"), size=12),
             customdata=custom,
             hovertemplate=(
-                "변수=%{customdata[0]}<br>"
-                "기간=%{customdata[1]}<br>"
-                "ρ=%{customdata[2]}<extra></extra>"
+                "변수: %{customdata[0]}<br>"
+                "기간: %{customdata[1]}<br>"
+                "ρ: %{customdata[2]}<extra></extra>"
             ),
+            hoverlabel=CHART_LAYOUT["hoverlabel"],
             colorbar=dict(
                 title=dict(
                     text="ρ",
                     side="right",
-                    font=dict(color=_tok("fx-chart-tick", "#D0D7DE"), size=12),
+                    font=dict(color=_tok("fx-chart-tick"), size=12),
                 ),
                 thickness=12,
                 len=0.78,
                 outlinewidth=0,
-                tickfont=dict(color=_tok("fx-chart-tick", "#D0D7DE"), size=11),
+                tickfont=dict(color=_tok("fx-chart-tick"), size=11),
             ),
             showscale=True,
         )
     )
-    hm_paper = _tok("fx-heatmap-paper", "#131820")
-    grid = _tok("fx-chart-grid", "#2A3441")
-    tick = _tok("fx-chart-tick", "#D0D7DE")
+    hm_paper = _tok("fx-heatmap-paper")
+    grid = _tok("fx-chart-grid")
+    tick = _tok("fx-chart-tick")
     fig.update_layout(
         paper_bgcolor=hm_paper,
         plot_bgcolor=hm_paper,
-        font=dict(color=_tok("fx-chart-font", "#E6EDF3"), size=12),
+        font=dict(color=_tok("fx-chart-font"), size=12),
+        hoverlabel=CHART_LAYOUT["hoverlabel"],
         margin=dict(l=120, r=60, t=36, b=24),
         title=None,
         height=max(height, 36 * max(len(y_labels), 1) + 100),
@@ -503,15 +529,17 @@ def correlation_heatmap(
 def _hex_to_rgba(hex_color: str, alpha: float) -> str:
     h = hex_color.lstrip("#")
     if len(h) != 6:
-        return f"rgba(110, 118, 129, {alpha})"
+        h = _tok("fx-timeline-invalid").lstrip("#")
     r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
     return f"rgba({r},{g},{b},{alpha})"
 
 
 def driver_timeline_chart(
     regimes: pd.DataFrame,
-    height: int = 240,
-    low_confidence_threshold: float = 0.30,
+    height: int = 170,
+    low_confidence_threshold: float = 0.0,
+    title: str | None = None,
+    x_range: tuple[Any, Any] | list[Any] | None = None,
 ) -> go.Figure:
     if regimes is None or regimes.empty:
         return _empty_message_fig("주도 변수 구간이 없습니다.", height=height)
@@ -520,7 +548,6 @@ def driver_timeline_chart(
     df["start_date"] = pd.to_datetime(df["start_date"])
     df["end_date"] = pd.to_datetime(df["end_date"])
     df["end_plot"] = df["end_date"] + pd.Timedelta(days=1)
-    df["lane"] = "주도 변수"
     df["low_confidence"] = df["average_abs_correlation"].fillna(0) < low_confidence_threshold
 
     fig = go.Figure()
@@ -532,21 +559,27 @@ def driver_timeline_chart(
         if did in SPECIAL_COLORS:
             fill = _hex_to_rgba(base, 0.40 if low else 0.75)
 
-        conf_label = "낮은 신뢰도 (|ρ|<0.30)" if low and did not in ("NONE", "MIXED") else (
-            "특수 국면" if did in ("NONE", "MIXED") else "정상"
-        )
-        avg_s = row["average_signed_correlation"]
-        avg_a = row["average_abs_correlation"]
-        avg_s_txt = "—" if pd.isna(avg_s) else f"{float(avg_s):.2f}"
-        avg_a_txt = "—" if pd.isna(avg_a) else f"{float(avg_a):.2f}"
+        if did == "NONE":
+            driver_txt = "—"
+            avg_abs_txt = "—"
+            avg_s_txt = "—"
+        elif did == "MIXED":
+            driver_txt = str(row["driver_name"])
+            avg_abs_txt = "—"
+            avg_s_txt = "—"
+        else:
+            driver_txt = str(row["driver_name"])
+            avg_abs = row["average_abs_correlation"]
+            avg_s = row["average_signed_correlation"]
+            avg_abs_txt = "—" if pd.isna(avg_abs) else f"{float(avg_abs):.2f}"
+            avg_s_txt = "—" if pd.isna(avg_s) else f"{float(avg_s):.2f}"
         hover = (
-            f"주도: {row['driver_name']}<br>"
-            f"시작: {row['start_date'].date()}<br>"
-            f"종료: {row['end_date'].date()}<br>"
-            f"지속: {int(row['trading_days'])}일<br>"
-            f"평균 ρ: {avg_s_txt}<br>"
-            f"평균 |ρ|: {avg_a_txt}<br>"
-            f"{conf_label}<extra></extra>"
+            f"주도변수: {driver_txt}<br>"
+            f"시작일: {row['start_date'].date()}<br>"
+            f"종료일: {row['end_date'].date()}<br>"
+            f"지속일: {int(row['trading_days'])}일<br>"
+            f"평균 |ρ|: {avg_abs_txt}<br>"
+            f"평균 ρ: {avg_s_txt}<extra></extra>"
         )
         fig.add_trace(
             go.Bar(
@@ -561,20 +594,28 @@ def driver_timeline_chart(
             )
         )
 
-    fig.update_layout(
+    xaxis: dict[str, Any] = dict(
+        type="date",
+        title="",
+        gridcolor=_tok("fx-chart-grid"),
+        tickformat="%Y-%m",
+    )
+    if x_range is not None:
+        xaxis["range"] = list(x_range)
+        xaxis["autorange"] = False
+
+    layout_kw: dict[str, Any] = dict(
         **CHART_LAYOUT,
-        margin=dict(l=40, r=20, t=20, b=40),
+        margin=dict(l=40, r=20, t=28 if title else 12, b=36),
         height=height,
         barmode="overlay",
-        xaxis=dict(
-            type="date",
-            title="",
-            gridcolor=_tok("fx-chart-grid", "#2A3441"),
-            tickformat="%Y-%m",
-        ),
+        xaxis=xaxis,
         yaxis=dict(title=""),
         bargap=0.2,
     )
+    if title:
+        layout_kw["title"] = dict(text=title, font=dict(size=13), x=0, xanchor="left")
+    fig.update_layout(**layout_kw)
     return fig
 
 
@@ -589,8 +630,8 @@ def series_line_chart(
     if series is None or series.dropna().empty:
         return _empty_message_fig(f"{title}: 표시할 데이터가 없습니다.", height=height)
 
-    line_color = color or _tok("fx-detail-line", "#3FB950")
-    grid = _tok("fx-chart-grid", "#2A3441")
+    line_color = color or _tok("fx-detail-line")
+    grid = _tok("fx-chart-grid")
     s = series.dropna().sort_index()
     hover_vals = [
         "—" if pd.isna(v) else format(float(v), value_format)
@@ -620,18 +661,61 @@ def series_line_chart(
     return fig
 
 
-def dual_corr_detail_chart(
-    corr_series: pd.Series,
-    display_name: str,
-    window: int,
-    color: str,
-    height: int = 320,
+def dual_raw_level_chart(
+    usdkrw: pd.Series,
+    driver: pd.Series,
+    driver_name: str,
+    height: int = 360,
+    usd_color: str | None = None,
+    driver_color: str | None = None,
 ) -> go.Figure:
-    return series_line_chart(
-        corr_series,
-        title=f"{window}D 롤링 상관계수",
-        y_title="correlation",
-        color=color,
+    from plotly.subplots import make_subplots
+
+    u = usdkrw.dropna().sort_index() if usdkrw is not None else pd.Series(dtype=float)
+    d = driver.dropna().sort_index() if driver is not None else pd.Series(dtype=float)
+    if u.empty and d.empty:
+        return _empty_message_fig("표시할 원본값이 없습니다.", height=height)
+
+    left_color = usd_color or _tok("fx-detail-line")
+    right_color = driver_color or _tok("fx-detail-driver-line")
+    grid = _tok("fx-chart-grid")
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    if not u.empty:
+        u_hover = ["—" if pd.isna(v) else f"{float(v):,.2f}" for v in u.values]
+        fig.add_trace(
+            go.Scatter(
+                x=u.index,
+                y=u.values,
+                mode="lines",
+                name="USDKRW",
+                line=dict(color=left_color, width=1.6),
+                customdata=u_hover,
+                hovertemplate="USDKRW: %{customdata}<extra></extra>",
+            ),
+            secondary_y=False,
+        )
+    if not d.empty:
+        d_hover = ["—" if pd.isna(v) else f"{float(v):,.2f}" for v in d.values]
+        fig.add_trace(
+            go.Scatter(
+                x=d.index,
+                y=d.values,
+                mode="lines",
+                name=driver_name,
+                line=dict(color=right_color, width=1.6),
+                customdata=d_hover,
+                hovertemplate=f"{driver_name}: %{{customdata}}<extra></extra>",
+            ),
+            secondary_y=True,
+        )
+    fig.update_layout(
+        **CHART_LAYOUT,
+        margin=dict(l=48, r=48, t=24, b=36),
         height=height,
-        value_format=".2f",
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        xaxis=dict(title="", gridcolor=grid, tickformat="%Y-%m"),
     )
+    fig.update_yaxes(title_text="USDKRW", secondary_y=False, gridcolor=grid)
+    fig.update_yaxes(title_text=driver_name, secondary_y=True, gridcolor=grid, showgrid=False)
+    return fig
