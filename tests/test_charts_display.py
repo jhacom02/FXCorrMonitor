@@ -24,7 +24,6 @@ def _corr_frame(rows: list[tuple[str, str, float]]) -> pd.DataFrame:
                 "date": as_of,
                 "instrument_id": iid,
                 "display_name": name,
-                "category": "test",
                 "rolling_correlation": corr,
                 "abs_correlation": abs(corr),
                 "observation_count": 20,
@@ -37,12 +36,12 @@ def test_min_abs_excludes_low_spx_before_topn():
     df = _corr_frame(
         [
             ("KOSPI", "KOSPI", 0.52),
-            ("KTB10Y", "국고채 10Y", 0.36),
-            ("KTB3Y", "국고채 3Y", 0.31),
+            ("KTB10Y", "KTB10Y", 0.36),
+            ("KTB3Y", "KTB3Y", 0.31),
             ("VIX", "VIX", 0.30),
-            ("SPX", "S&P 500", 0.24),
+            ("SPX", "SPX", 0.24),
             ("DXY", "DXY", 0.40),
-            ("NDX", "Nasdaq 100", 0.35),
+            ("NDX", "NDX", 0.35),
         ]
     )
     selected = ["KOSPI", "KTB10Y", "KTB3Y", "VIX", "SPX", "DXY", "NDX"]
@@ -68,7 +67,7 @@ def test_driver_forced_even_below_min_abs():
             ("KOSPI", "KOSPI", 0.25),
             ("DXY", "DXY", 0.55),
             ("VIX", "VIX", 0.45),
-            ("SPX", "S&P 500", 0.40),
+            ("SPX", "SPX", 0.40),
         ]
     )
     info = resolve_chart_instruments(
@@ -122,7 +121,6 @@ def test_correlation_heatmap_builds_with_labels_and_desaturate():
                 {
                     "instrument_id": iid,
                     "display_name": name,
-                    "category": "test",
                     "window": w,
                     "rolling_correlation": c,
                 }

@@ -18,7 +18,6 @@ SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS instruments (
     instrument_id TEXT PRIMARY KEY,
     display_name TEXT NOT NULL,
-    category TEXT NOT NULL,
     source_sheet TEXT NOT NULL,
     source_code TEXT,
     source_column TEXT NOT NULL,
@@ -26,7 +25,6 @@ CREATE TABLE IF NOT EXISTS instruments (
     transformation TEXT NOT NULL,
     alignment TEXT NOT NULL,
     active INTEGER NOT NULL DEFAULT 1,
-    note TEXT,
     updated_at TEXT NOT NULL
 );
 
@@ -80,6 +78,11 @@ def init_db(db_path: str | Path | None = None, replace: bool = False) -> Path:
         logger.info("Removed existing database: %s", path)
     with get_connection(path) as conn:
         conn.executescript(SCHEMA_SQL)
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(instruments)").fetchall()]
+        if "category" in cols:
+            conn.execute("ALTER TABLE instruments DROP COLUMN category")
+        if "note" in cols:
+            conn.execute("ALTER TABLE instruments DROP COLUMN note")
     logger.info("Initialized database schema at %s", path)
     return path
 
@@ -99,15 +102,14 @@ def table_exists(db_path: str | Path | None, table_name: str) -> bool:
 def upsert_instruments(rows: Iterable[dict[str, Any]], db_path: str | Path | None = None) -> int:
     sql = """
     INSERT INTO instruments (
-        instrument_id, display_name, category, source_sheet, source_code,
-        source_column, data_type, transformation, alignment, active, note, updated_at
+        instrument_id, display_name, source_sheet, source_code,
+        source_column, data_type, transformation, alignment, active, updated_at
     ) VALUES (
-        :instrument_id, :display_name, :category, :source_sheet, :source_code,
-        :source_column, :data_type, :transformation, :alignment, :active, :note, :updated_at
+        :instrument_id, :display_name, :source_sheet, :source_code,
+        :source_column, :data_type, :transformation, :alignment, :active, :updated_at
     )
     ON CONFLICT(instrument_id) DO UPDATE SET
         display_name=excluded.display_name,
-        category=excluded.category,
         source_sheet=excluded.source_sheet,
         source_code=excluded.source_code,
         source_column=excluded.source_column,
@@ -115,13 +117,17 @@ def upsert_instruments(rows: Iterable[dict[str, Any]], db_path: str | Path | Non
         transformation=excluded.transformation,
         alignment=excluded.alignment,
         active=excluded.active,
-        note=excluded.note,
         updated_at=excluded.updated_at
     """
     rows_list = list(rows)
     if not rows_list:
         return 0
     with get_connection(db_path) as conn:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(instruments)").fetchall()]
+        if "category" in cols:
+            conn.execute("ALTER TABLE instruments DROP COLUMN category")
+        if "note" in cols:
+            conn.execute("ALTER TABLE instruments DROP COLUMN note")
         conn.executemany(sql, rows_list)
     return len(rows_list)
 

@@ -17,6 +17,7 @@ if str(ROOT) not in sys.path:
 from src.analytics import (
     DRIVER_MIXED,
     DRIVER_NONE,
+    DRIVER_NONE_NAME,
     assign_daily_drivers,
     calculate_rolling_correlations,
     compress_driver_regimes,
@@ -35,9 +36,7 @@ def _synth_corr_frame(n: int = 40) -> pd.DataFrame:
     rng = np.random.default_rng(42)
     idx = pd.date_range("2024-01-01", periods=n, freq="B")
     target = rng.normal(0, 0.01, size=n)
-    # Strong co-mover
     a = 0.9 * target + rng.normal(0, 0.001, size=n)
-    # Independent
     b = rng.normal(0, 0.01, size=n)
     return pd.DataFrame({"USDKRW": target, "DXY": a, "VIX": b}, index=idx)
 
@@ -46,14 +45,12 @@ def test_rolling_corr_in_range_and_min_periods():
     df = _synth_corr_frame(50)
     out = calculate_rolling_correlations(df, drivers=["DXY", "VIX"], window=20)
     assert out["rolling_correlation"].dropna().between(-1, 1).all()
-    # First valid correlations require at least 16 pairwise obs
     dxy = out[out["instrument_id"] == "DXY"].sort_values("date")
     first_valid = dxy[dxy["rolling_correlation"].notna()].iloc[0]
     assert first_valid["observation_count"] >= 16
 
 
 def test_driver_top_winner():
-    # Construct scored panel where DXY clearly wins
     dates = pd.date_range("2024-06-01", periods=5, freq="B")
     rows = []
     for d in dates:
@@ -62,7 +59,6 @@ def test_driver_top_winner():
                 "date": d,
                 "instrument_id": "DXY",
                 "display_name": "DXY",
-                "category": "외환 환율",
                 "rolling_correlation": 0.8,
                 "abs_correlation": 0.8,
                 "observation_count": 20,
@@ -73,7 +69,6 @@ def test_driver_top_winner():
                 "date": d,
                 "instrument_id": "VIX",
                 "display_name": "VIX",
-                "category": "변동성 지표",
                 "rolling_correlation": 0.1,
                 "abs_correlation": 0.1,
                 "observation_count": 20,
@@ -93,7 +88,6 @@ def test_mixed_regime_when_gap_small():
                 "date": d,
                 "instrument_id": "DXY",
                 "display_name": "DXY",
-                "category": "외환 환율",
                 "rolling_correlation": 0.55,
                 "abs_correlation": 0.55,
                 "observation_count": 20,
@@ -104,7 +98,6 @@ def test_mixed_regime_when_gap_small():
                 "date": d,
                 "instrument_id": "USDCNH",
                 "display_name": "USDCNH",
-                "category": "외환 환율",
                 "rolling_correlation": 0.52,
                 "abs_correlation": 0.52,
                 "observation_count": 20,
@@ -113,6 +106,7 @@ def test_mixed_regime_when_gap_small():
     scored = compute_driver_scores(pd.DataFrame(rows))
     daily = assign_daily_drivers(scored)
     assert daily.iloc[-1]["driver_id"] == DRIVER_MIXED
+    assert daily.iloc[-1]["driver_name"] == "혼합(DXY, USDCNH)"
 
 
 def test_none_when_score_below_threshold():
@@ -124,7 +118,6 @@ def test_none_when_score_below_threshold():
                 "date": d,
                 "instrument_id": "DXY",
                 "display_name": "DXY",
-                "category": "외환 환율",
                 "rolling_correlation": 0.2,
                 "abs_correlation": 0.2,
                 "observation_count": 20,
@@ -135,7 +128,6 @@ def test_none_when_score_below_threshold():
                 "date": d,
                 "instrument_id": "VIX",
                 "display_name": "VIX",
-                "category": "변동성 지표",
                 "rolling_correlation": 0.1,
                 "abs_correlation": 0.1,
                 "observation_count": 20,
@@ -144,6 +136,7 @@ def test_none_when_score_below_threshold():
     scored = compute_driver_scores(pd.DataFrame(rows))
     daily = assign_daily_drivers(scored)
     assert daily.iloc[-1]["driver_id"] == DRIVER_NONE
+    assert daily.iloc[-1]["driver_name"] == DRIVER_NONE_NAME
 
 
 def test_compress_regimes():
@@ -153,13 +146,11 @@ def test_compress_regimes():
             "date": dates,
             "driver_id": ["DXY", "DXY", "VIX", "DXY", "DXY", "DXY"],
             "driver_name": ["DXY"] * 6,
-            "category": ["외환 환율"] * 6,
             "signed_correlation": [0.5] * 6,
             "abs_correlation": [0.5] * 6,
             "driver_score": [0.5] * 6,
         }
     )
-    # Single-day VIX between DXY runs should be absorbed back to DXY
     regimes = compress_driver_regimes(daily)
     assert len(regimes) == 1
     assert regimes.iloc[0]["driver_id"] == "DXY"

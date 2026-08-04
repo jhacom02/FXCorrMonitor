@@ -53,28 +53,42 @@ def normalize_date(value: Any) -> date | None:
     if isinstance(value, pd.Timestamp):
         if pd.isna(value):
             return None
-        return value.date()
+        try:
+            return value.date()
+        except (ValueError, NotImplementedError, OverflowError):
+            return None
     if isinstance(value, (int, float, np.integer, np.floating)):
         num = float(value)
         if math.isnan(num) or math.isinf(num):
             return None
+        as_int = int(num)
+        if as_int == num and 19000101 <= as_int <= 21001231:
+            s = f"{as_int:08d}"
+            try:
+                return date(int(s[0:4]), int(s[4:6]), int(s[6:8]))
+            except ValueError:
+                pass
         try:
             ts = pd.to_datetime(num, unit="D", origin="1899-12-30")
             if pd.isna(ts):
                 return None
             return ts.date()
-        except (ValueError, OutOfBoundsDatetime, OverflowError):
+        except (ValueError, OutOfBoundsDatetime, OverflowError, NotImplementedError):
             return None
     if isinstance(value, str):
         text = value.strip()
         if not text or text.lower() in {"nan", "none", "null"}:
             return None
+        if text.isdigit() and len(text) == 8:
+            packed = normalize_date(int(text))
+            if packed is not None:
+                return packed
         try:
             ts = pd.to_datetime(text)
             if pd.isna(ts):
                 return None
             return ts.date()
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, OutOfBoundsDatetime, NotImplementedError):
             return None
     return None
 

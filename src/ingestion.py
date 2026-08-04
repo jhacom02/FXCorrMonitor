@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,8 @@ from src.utils import date_to_iso, normalize_date, parse_numeric, resolve_path, 
 
 logger = logging.getLogger(__name__)
 
+_SHEET_SUFFIX_RE = re.compile(r"_\d+$")
+
 
 class IngestionError(Exception):
     """Fatal ingestion error (e.g. missing USDKRW)."""
@@ -30,49 +33,190 @@ def _sheet_names(path: Path) -> list[str]:
     return list(xl.sheet_names)
 
 
+def _normalize_sheet_name(name: str) -> str:
+    return _SHEET_SUFFIX_RE.sub("", str(name).strip())
+
+
+def _normalize_source_code(value: Any) -> str | None:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, float):
+        if value == int(value):
+            return str(int(value))
+        return str(value).strip()
+    if isinstance(value, int):
+        return str(value)
+    text = str(value).strip()
+    return text or None
+
+
+def _read_sheet_meta_code(excel_path: Path, sheet_name: str) -> str | None:
+    meta = pd.read_excel(
+        excel_path,
+        sheet_name=sheet_name,
+        header=None,
+        nrows=1,
+        engine="openpyxl",
+    )
+    if meta.empty or meta.shape[1] < 2:
+        return None
+    row = meta.iloc[0]
+    for i, cell in enumerate(row.tolist()):
+        if str(cell).strip() == "종목코드" and i + 1 < len(row):
+            return _normalize_source_code(row.iloc[i + 1])
+    if meta.shape[1] > 5:
+        return _normalize_source_code(row.iloc[5])
+    return None
+
+
+def build_sheet_catalog(
+    excel_path: Path,
+    available_sheets: list[str] | None = None,
+) -> tuple[list[dict[str, str | None]], list[str]]:
+    warnings: list[str] = []
+    sheets = available_sheets if available_sheets is not None else _sheet_names(excel_path)
+    catalog: list[dict[str, str | None]] = []
+    for actual in sheets:
+        code = None
+        try:
+            code = _read_sheet_meta_code(excel_path, actual)
+        except Exception as exc:
+            msg = f"시트 메타 읽기 실패: {actual}: {exc}"
+            warnings.append(msg)
+            logger.warning(msg)
+        catalog.append(
+            {
+                "actual": actual,
+                "normalized": _normalize_sheet_name(actual),
+                "code": code,
+            }
+        )
+
+    by_code: dict[str, list[str]] = {}
+    for entry in catalog:
+        code = entry["code"]
+        if not code:
+            continue
+        by_code.setdefault(code, []).append(str(entry["actual"]))
+    for code, names in by_code.items():
+        if len(names) > 1:
+            msg = (
+                f"동일 종목코드 '{code}'가 여러 시트에 있습니다: {names}. "
+                "해당 코드로는 매칭하지 않습니다."
+            )
+            warnings.append(msg)
+            logger.warning(msg)
+
+    return catalog, warnings
+
+
+def resolve_sheet_for_instrument(
+    instrument: Instrument,
+    catalog: list[dict[str, str | None]],
+) -> tuple[str | None, list[str]]:
+    warnings: list[str] = []
+    by_code: dict[str, list[str]] = {}
+    for entry in catalog:
+        code = entry["code"]
+        if not code:
+            continue
+        by_code.setdefault(str(code), []).append(str(entry["actual"]))
+
+    want_code = _normalize_source_code(instrument.source_code)
+    if want_code and want_code in by_code:
+        matches = by_code[want_code]
+        if len(matches) == 1:
+            return matches[0], warnings
+        warnings.append(
+            f"종목코드 '{want_code}' 모호 ({instrument.instrument_id}): "
+            f"시트 {matches} — 시트명 fallback 사용"
+        )
+
+    want_name = _normalize_sheet_name(instrument.sheet_name)
+    name_hits = [
+        str(e["actual"]) for e in catalog if e["normalized"] == want_name
+    ]
+    if len(name_hits) == 1:
+        return name_hits[0], warnings
+    if len(name_hits) > 1:
+        msg = (
+            f"정규화 시트명 '{want_name}'이 여러 개입니다 "
+            f"({instrument.instrument_id}): {name_hits}"
+        )
+        warnings.append(msg)
+        logger.warning(msg)
+        return None, warnings
+
+    msg = f"시트 없음: '{instrument.sheet_name}' ({instrument.instrument_id})"
+    warnings.append(msg)
+    logger.warning(msg)
+    return None, warnings
+
+
 def read_instrument_sheet(
     excel_path: Path,
     instrument: Instrument,
     available_sheets: list[str] | None = None,
-) -> tuple[pd.DataFrame, list[str]]:
+    catalog: list[dict[str, str | None]] | None = None,
+) -> tuple[pd.DataFrame, list[str], str | None]:
     warnings: list[str] = []
     sheets = available_sheets if available_sheets is not None else _sheet_names(excel_path)
+    if catalog is None:
+        catalog, cat_warn = build_sheet_catalog(excel_path, sheets)
+        warnings.extend(cat_warn)
 
-    if instrument.sheet_name not in sheets:
-        msg = f"시트 없음: '{instrument.sheet_name}' ({instrument.instrument_id})"
-        warnings.append(msg)
-        logger.warning(msg)
-        return pd.DataFrame(columns=["date", "raw_value", "parse_failures"]), warnings
+    actual_sheet, resolve_warn = resolve_sheet_for_instrument(instrument, catalog)
+    warnings.extend(resolve_warn)
+    if actual_sheet is None:
+        return (
+            pd.DataFrame(columns=["date", "raw_value", "parse_failures"]),
+            warnings,
+            None,
+        )
 
     try:
         df = pd.read_excel(
             excel_path,
-            sheet_name=instrument.sheet_name,
+            sheet_name=actual_sheet,
             header=2,
             engine="openpyxl",
         )
     except Exception as exc:
-        msg = f"시트 읽기 실패: {instrument.sheet_name} ({instrument.instrument_id}): {exc}"
+        msg = f"시트 읽기 실패: {actual_sheet} ({instrument.instrument_id}): {exc}"
         warnings.append(msg)
         logger.warning(msg)
-        return pd.DataFrame(columns=["date", "raw_value", "parse_failures"]), warnings
+        return (
+            pd.DataFrame(columns=["date", "raw_value", "parse_failures"]),
+            warnings,
+            None,
+        )
 
     df.columns = [str(c).strip() if c is not None else "" for c in df.columns]
 
     if "일자" not in df.columns:
-        msg = f"열 '일자' 없음: {instrument.sheet_name} ({instrument.instrument_id})"
+        msg = f"열 '일자' 없음: {actual_sheet} ({instrument.instrument_id})"
         warnings.append(msg)
         logger.warning(msg)
-        return pd.DataFrame(columns=["date", "raw_value", "parse_failures"]), warnings
+        return (
+            pd.DataFrame(columns=["date", "raw_value", "parse_failures"]),
+            warnings,
+            None,
+        )
 
     if instrument.source_column not in df.columns:
         msg = (
             f"열 '{instrument.source_column}' 없음: "
-            f"{instrument.sheet_name} ({instrument.instrument_id})"
+            f"{actual_sheet} ({instrument.instrument_id})"
         )
         warnings.append(msg)
         logger.warning(msg)
-        return pd.DataFrame(columns=["date", "raw_value", "parse_failures"]), warnings
+        return (
+            pd.DataFrame(columns=["date", "raw_value", "parse_failures"]),
+            warnings,
+            None,
+        )
 
     work = df[["일자", instrument.source_column]].copy()
     dates: list[str | None] = []
@@ -99,13 +243,17 @@ def read_instrument_sheet(
     out = out.dropna(subset=["date", "raw_value"])
     if out.empty:
         warnings.append(f"유효 데이터 없음: {instrument.instrument_id}")
-        return pd.DataFrame(columns=["date", "raw_value", "parse_failures"]), warnings
+        return (
+            pd.DataFrame(columns=["date", "raw_value", "parse_failures"]),
+            warnings,
+            actual_sheet,
+        )
 
     out = out.sort_values("date")
     out = out.drop_duplicates(subset=["date"], keep="last")
     out["parse_failures"] = parse_failures
     out = out.reset_index(drop=True)
-    return out, warnings
+    return out, warnings, actual_sheet
 
 
 def prepare_market_rows(
@@ -113,7 +261,9 @@ def prepare_market_rows(
     instrument: Instrument,
     source_file: str,
     loaded_at: str,
+    source_sheet: str | None = None,
 ) -> list[dict[str, Any]]:
+    sheet = source_sheet if source_sheet is not None else instrument.sheet_name
     rows: list[dict[str, Any]] = []
     for _, r in cleaned.iterrows():
         rows.append(
@@ -122,7 +272,7 @@ def prepare_market_rows(
                 "instrument_id": instrument.instrument_id,
                 "raw_value": float(r["raw_value"]),
                 "source_file": source_file,
-                "source_sheet": instrument.sheet_name,
+                "source_sheet": sheet,
                 "source_column": instrument.source_column,
                 "loaded_at": loaded_at,
             }
@@ -160,13 +310,18 @@ def ingest_excel(
         available = _sheet_names(excel_path)
         logger.info("Excel sheets (%d): %s", len(available), available)
 
+        catalog, cat_warn = build_sheet_catalog(excel_path, available)
+        warnings.extend(cat_warn)
+
         instrument_rows = [
             instrument_to_row(inst, loaded_at) for inst in INSTRUMENTS
         ]
         upsert_instruments(instrument_rows, db)
 
         for inst in INSTRUMENTS:
-            cleaned, w = read_instrument_sheet(excel_path, inst, available)
+            cleaned, w, actual_sheet = read_instrument_sheet(
+                excel_path, inst, available, catalog=catalog
+            )
             warnings.extend(w)
             for msg in w:
                 if "시트 없음" in msg:
@@ -183,14 +338,17 @@ def ingest_excel(
             if "parse_failures" in cleaned.columns:
                 parse_failure_total += int(cleaned["parse_failures"].iloc[0])
 
-            rows = prepare_market_rows(cleaned, inst, source_name, loaded_at)
+            rows = prepare_market_rows(
+                cleaned, inst, source_name, loaded_at, source_sheet=actual_sheet
+            )
             all_rows.extend(rows)
             if inst.instrument_id == TARGET_ID:
                 usdkrw_loaded = True
             logger.info(
-                "Loaded %s: %d rows (%s ~ %s)",
+                "Loaded %s: %d rows from [%s] (%s ~ %s)",
                 inst.instrument_id,
                 len(rows),
+                actual_sheet,
                 rows[0]["date"] if rows else "—",
                 rows[-1]["date"] if rows else "—",
             )

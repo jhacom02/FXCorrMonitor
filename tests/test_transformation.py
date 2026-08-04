@@ -134,7 +134,6 @@ def test_active_false_excluded_from_default_analysis(monkeypatch):
     inactive = Instrument(
         instrument_id="FAKE_INACTIVE",
         display_name="Fake",
-        category="외환 환율",
         sheet_name="x",
         source_code="x",
         source_column="현재가",

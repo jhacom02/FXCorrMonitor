@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import sys
 from datetime import date, timedelta
-from html import escape
 from pathlib import Path
 
 import numpy as np
@@ -97,7 +96,7 @@ def _safe_message(exc: Exception) -> str:
 
 def render_empty_state() -> None:
     st.title("USDKRW Driver Monitor")
-    st.caption("USDKRW와 주요 시장변수 간 롤링 상관관계 및 시점별 주도 변수 변화를 모니터링합니다.")
+    st.caption("USDKRW와 주요 시장변수 간 롤링 상관관계 및 시기별 주도 변수 변화를 모니터링합니다.")
     st.info(
         "SQLite에 적재된 데이터가 없습니다.\n\n"
         "1. 인포맥스에서 Excel을 추출합니다.\n"
@@ -343,7 +342,7 @@ def main() -> None:
         return
 
     st.title("USDKRW Driver Monitor")
-    st.caption("USDKRW와 주요 시장변수 간 롤링 상관관계 및 시점별 주도 변수 변화를 모니터링합니다.")
+    st.caption("USDKRW와 주요 시장변수 간 롤링 상관관계 및 시기별 주도 변수 변화를 모니터링합니다.")
 
     if not controls["selected_ids"]:
         st.warning("표시할 변수를 하나 이상 선택하세요.")
@@ -451,15 +450,15 @@ def main() -> None:
         with c2:
             kpi_card("롤링 상관계수", rho_txt)
         with c3:
-            kpi_card("USDKRW (전일)", format_fx(latest_fx))
+            kpi_card("USDKRW", format_fx(latest_fx))
         with c4:
-            kpi_card("USDKRW (변화)", chg_txt)
+            kpi_card("변화량", chg_txt)
         
         with st.expander("분석 기준 보기", expanded=False):
             st.markdown(
                 """
 - Pearson 롤링 상관계수를 사용합니다.
-- 절대 상관계수 최소 기준은 차트, 랭킹, 히트맵, 상세 필터에 적용됩니다.
+- 최소 절대 상관계수는 차트, 랭킹, 히트맵, 상세 필터에 적용됩니다.
 - 전일 확정 종가만 사용하며 실시간 현재가는 포함하지 않습니다.
 - 주도 변수는 선택 기간 내 USDKRW와 가장 안정적으로 동행한 변수이며, 인과관계를 의미하지 않습니다.
                 """
@@ -489,7 +488,8 @@ def main() -> None:
         # --- Ranking ---
         st.markdown('<div class="fx-section-title">주도 변수 랭킹</div>', unsafe_allow_html=True)
         st.caption(
-            f"전체 시장변수 {len(selected_drivers)}개 중 최소 상관계수(|ρ| ≥ {controls['min_abs']:.2f})를 충족한 시장변수들을 표시합니다."
+            f"{controls['window']}일 기준. 전체 시장변수 {len(selected_drivers)}개 중 "
+            f"최소 상관계수(|ρ| ≥ {controls['min_abs']:.2f})를 충족한 시장변수들을 표시합니다."
         )
         if ranking.empty:
             st.info("최소 상관계수 기준을 충족하는 랭킹 변수가 없습니다.")
@@ -499,7 +499,6 @@ def main() -> None:
                 columns={
                     "rank": "순위",
                     "display_name": "시장변수",
-                    "category": "카테고리",
                     "rolling_correlation": "상관계수",
                     "abs_correlation": "절대 상관계수",
                     "driver_score": "안정화 점수",
@@ -511,7 +510,6 @@ def main() -> None:
             col_order = [
                 "순위",
                 "시장변수",
-                "카테고리",
                 "상관계수",
                 "절대 상관계수",
                 "안정화 점수",
@@ -539,7 +537,7 @@ def main() -> None:
         # --- Heatmap ---
         st.markdown('<div class="fx-section-title">상관계수 히트맵</div>', unsafe_allow_html=True)
         st.caption(
-            "히트맵 색상은 상관계수의 부호와 크기를 나타내며 호재·악재를 의미하지 않습니다."
+            "히트맵 색상은 상관계수의 부호와 크기를 나타내며 호재/악재를 의미하지 않습니다."
         )
         if multi.empty:
             st.info("히트맵을 그릴 변수가 없습니다.")
@@ -557,7 +555,7 @@ def main() -> None:
 
         # --- Timeline ---
         st.markdown('<div class="fx-section-title">시기별 주도 변수</div>', unsafe_allow_html=True)
-        st.caption("타임라인은 주도 변수 판정 결과 전체입니다. |ρ|&lt;0.30 구간은 흐리게 표시됩니다.")
+        st.caption("시기별 주도 변수 판정 결과를 타임라인으로 표시합니다. |ρ|&lt;0.30 구간은 흐리게 표시됩니다.")
         st.plotly_chart(
             driver_timeline_chart(regimes, low_confidence_threshold=0.30),
             use_container_width=True,
@@ -566,18 +564,33 @@ def main() -> None:
         )
         if not regimes.empty:
             reg_show = regimes.copy()
-            reg_show["낮은 신뢰도"] = reg_show.apply(
-                lambda r: (
-                    "예"
-                    if (
-                        pd.notna(r["average_abs_correlation"])
-                        and r["average_abs_correlation"] < 0.30
-                        and r["driver_id"] not in (DRIVER_NONE, DRIVER_MIXED)
-                    )
-                    or r["driver_id"] in (DRIVER_NONE, DRIVER_MIXED)
-                    else ""
-                ),
-                axis=1,
+            for _col in ("min_signed_correlation", "max_signed_correlation"):
+                if _col not in reg_show.columns:
+                    reg_show[_col] = np.nan
+            special = reg_show["driver_id"].isin([DRIVER_NONE, DRIVER_MIXED]).to_numpy()
+
+            def _blank_or_rho(series: pd.Series) -> list[str]:
+                out: list[str] = []
+                for i, v in enumerate(series):
+                    if special[i]:
+                        out.append("")
+                    elif pd.isna(v):
+                        out.append("—")
+                    else:
+                        out.append(f"{float(v):.2f}")
+                return out
+
+            reg_show["average_signed_correlation"] = _blank_or_rho(
+                reg_show["average_signed_correlation"]
+            )
+            reg_show["average_abs_correlation"] = _blank_or_rho(
+                reg_show["average_abs_correlation"]
+            )
+            reg_show["min_signed_correlation"] = _blank_or_rho(
+                reg_show["min_signed_correlation"]
+            )
+            reg_show["max_signed_correlation"] = _blank_or_rho(
+                reg_show["max_signed_correlation"]
             )
             reg_show["start_date"] = pd.to_datetime(reg_show["start_date"]).dt.date
             reg_show["end_date"] = pd.to_datetime(reg_show["end_date"]).dt.date
@@ -585,37 +598,25 @@ def main() -> None:
                 columns={
                     "start_date": "시작일",
                     "end_date": "종료일",
-                    "driver_name": "주도 변수",
-                    "category": "카테고리",
-                    "trading_days": "지속 거래일",
+                    "trading_days": "지속일",
+                    "driver_name": "시장변수",
                     "average_signed_correlation": "평균 ρ",
                     "average_abs_correlation": "평균 |ρ|",
-                    "max_abs_correlation": "최대 |ρ|",
+                    "min_signed_correlation": "최소 ρ",
+                    "max_signed_correlation": "최대 ρ",
                 }
             )
             cols = [
                 "시작일",
                 "종료일",
-                "주도 변수",
-                "카테고리",
-                "지속 거래일",
+                "지속일",
+                "시장변수",
                 "평균 ρ",
                 "평균 |ρ|",
-                "최대 |ρ|",
-                "낮은 신뢰도",
+                "최소 ρ",
+                "최대 ρ",
             ]
-            st.dataframe(
-                reg_show[cols].style.format(
-                    {
-                        "평균 ρ": "{:.2f}",
-                        "평균 |ρ|": "{:.2f}",
-                        "최대 |ρ|": "{:.2f}",
-                    },
-                    na_rep="—",
-                ),
-                use_container_width=True,
-                hide_index=True,
-            )
+            st.dataframe(reg_show[cols], use_container_width=True, hide_index=True)
 
         # --- Detail ---
         st.markdown('<div class="fx-section-title">변수별 상세 분석</div>', unsafe_allow_html=True)
@@ -720,13 +721,12 @@ def main() -> None:
                     m120 = r["rolling_correlation"]
 
             series_t = transformed[pick] if pick in transformed.columns else pd.Series(dtype=float)
-            valid = series_t.dropna()
-            meta = frame["meta"].get(pick, {})
             corr_s = pick_corr.dropna()
             min_idx = corr_s.idxmin() if len(corr_s) else None
             max_idx = corr_s.idxmax() if len(corr_s) else None
 
-            note_line = f"<li>{escape(inst.note)}</li>" if inst.note else ""
+            avg_rho = format_corr(float(corr_s.mean()) if len(corr_s) else np.nan)
+            avg_abs_rho = format_corr(float(corr_s.abs().mean()) if len(corr_s) else np.nan)
             min_rho = format_corr(float(corr_s.min()) if len(corr_s) else np.nan)
             max_rho = format_corr(float(corr_s.max()) if len(corr_s) else np.nan)
             min_date = pd.Timestamp(min_idx).date() if min_idx is not None else "—"
@@ -735,14 +735,13 @@ def main() -> None:
                 f"""
 <div class="fx-detail-panel">
 <ul>
-<li>최신 20D ρ: <strong>{format_corr(m20)}</strong></li>
-<li>최신 60D ρ: <strong>{format_corr(m60)}</strong></li>
-<li>최신 120D ρ: <strong>{format_corr(m120)}</strong></li>
-<li>전체 기간 유효 관측치: <strong>{len(valid)}</strong></li>
-<li>결측률: <strong>{format_pct(meta.get('missing_rate'))}</strong></li>
-<li>최소 ρ: <strong>{min_rho}</strong> ({min_date})</li>
-<li>최대 ρ: <strong>{max_rho}</strong> ({max_date})</li>
-{note_line}
+<li>20D ρ: {format_corr(m20)}</li>
+<li>60D ρ: {format_corr(m60)}</li>
+<li>120D ρ: {format_corr(m120)}</li>
+<li>평균 ρ: {avg_rho}</li>
+<li>평균 |ρ|: {avg_abs_rho}</li>
+<li>최소 ρ: {min_rho} ({min_date})</li>
+<li>최대 ρ: {max_rho} ({max_date})</li>
 </ul>
 </div>
                 """,
@@ -751,35 +750,48 @@ def main() -> None:
 
         # --- Data quality ---
         with st.expander("데이터 품질"):
+            st.markdown("**변수별 데이터 품질**")
+            st.caption(f"데이터 커버리지 확인을 위해 변수별 데이터 품질을 표시합니다.")
             meta_rows = []
             for iid, m in frame["meta"].items():
                 meta_rows.append(
                     {
-                        "종목": m.get("display_name", iid),
-                        "instrument_id": iid,
-                        "최초 일자": m.get("first_date"),
-                        "최신 일자": m.get("last_date"),
-                        "관측치 수": m.get("obs_count"),
+                        "시작일": m.get("first_date"),
+                        "종료일": m.get("last_date"),
+                        "시장변수": m.get("display_name", iid),
+                        "관측수": m.get("obs_count"),
                         "결측률": m.get("missing_rate"),
                     }
                 )
             meta_df = pd.DataFrame(meta_rows)
             if not meta_df.empty:
                 st.dataframe(
-                    meta_df.style.format({"결측률": "{:.1%}"}, na_rep="—"),
+                    meta_df.style.format({"결측률": "{:.2%}"}, na_rep="—"),
                     use_container_width=True,
                     hide_index=True,
                 )
             last_ing = status.get("last_ingestion") or {}
-            st.write(f"최근 적재 파일: `{last_ing.get('source_file', '—')}`")
-            st.write(f"적재 상태: {last_ing.get('status', '—')}")
 
             abnormal = detect_abnormal_returns(transformed, raw_aligned)
-            st.markdown("**비정상 수익률·금리 변화 후보**")
+            st.markdown("**비정상 수익률/금리 변화 후보**")
+            st.caption("|로그수익률|>10%, |VIX|>50%, |금리변화|>50bp 기준을 초과하는 일간 관측치를 표시합니다.")
             if abnormal.empty:
-                st.caption("기준을 초과하는 관측이 없습니다.")
+                st.caption("기준을 초과하는 관측치가 없습니다.")
             else:
-                st.dataframe(abnormal, use_container_width=True, hide_index=True)
+                abn_show = abnormal.rename(
+                    columns={
+                        "date": "날짜",
+                        "display_name": "시장변수",
+                        "value": "일간변화",
+                        "threshold": "임계점",
+                        "unit": "단위",
+                    }
+                )
+                st.dataframe(
+                    abn_show[["날짜", "시장변수", "일간변화", "임계점", "단위"]],
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
     except ValueError as exc:
         logger.exception("Analysis error")

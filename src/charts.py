@@ -540,12 +540,12 @@ def driver_timeline_chart(
         avg_s_txt = "—" if pd.isna(avg_s) else f"{float(avg_s):.2f}"
         avg_a_txt = "—" if pd.isna(avg_a) else f"{float(avg_a):.2f}"
         hover = (
-            f"시작={row['start_date'].date()}<br>"
-            f"종료={row['end_date'].date()}<br>"
-            f"주도={row['driver_name']}<br>"
-            f"지속={int(row['trading_days'])}일<br>"
-            f"평균 ρ={avg_s_txt}<br>"
-            f"평균 |ρ|={avg_a_txt}<br>"
+            f"주도: {row['driver_name']}<br>"
+            f"시작: {row['start_date'].date()}<br>"
+            f"종료: {row['end_date'].date()}<br>"
+            f"지속: {int(row['trading_days'])}일<br>"
+            f"평균 ρ: {avg_s_txt}<br>"
+            f"평균 |ρ|: {avg_a_txt}<br>"
             f"{conf_label}<extra></extra>"
         )
         fig.add_trace(
@@ -584,6 +584,7 @@ def series_line_chart(
     y_title: str,
     color: str | None = None,
     height: int = 320,
+    value_format: str = ".2f",
 ) -> go.Figure:
     if series is None or series.dropna().empty:
         return _empty_message_fig(f"{title}: 표시할 데이터가 없습니다.", height=height)
@@ -591,13 +592,19 @@ def series_line_chart(
     line_color = color or _tok("fx-detail-line", "#3FB950")
     grid = _tok("fx-chart-grid", "#2A3441")
     s = series.dropna().sort_index()
+    hover_vals = [
+        "—" if pd.isna(v) else format(float(v), value_format)
+        for v in s.values
+    ]
     fig = go.Figure(
         go.Scatter(
             x=s.index,
             y=s.values,
             mode="lines",
+            name=title,
             line=dict(color=line_color, width=1.5),
-            hovertemplate="날짜=%{x|%Y-%m-%d}<br>값=%{y:.4f}<extra></extra>",
+            customdata=hover_vals,
+            hovertemplate="%{fullData.name}: %{customdata}<extra></extra>",
         )
     )
     fig.update_layout(
@@ -608,6 +615,7 @@ def series_line_chart(
         yaxis=dict(title=y_title, gridcolor=grid),
         xaxis=dict(title="", gridcolor=grid, tickformat="%Y-%m"),
         showlegend=False,
+        hovermode="x unified",
     )
     return fig
 
@@ -625,4 +633,5 @@ def dual_corr_detail_chart(
         y_title="correlation",
         color=color,
         height=height,
+        value_format=".2f",
     )
