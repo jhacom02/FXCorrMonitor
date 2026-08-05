@@ -41,12 +41,10 @@ from src.analytics import (
     regime_label_on_date,
 )
 from src.database import get_db_status, load_market_data
-from src.ingestion import IngestionError, ingest_excel
 from src.transformation import build_analysis_frame
 from src.utils import (
     DEFAULT_DB_PATH,
     DEFAULT_LOOKBACK_PERIOD,
-    DEFAULT_RAW_DIR,
     LOOKBACK_PERIODS,
     db_mtime_key,
     format_corr,
@@ -115,13 +113,11 @@ def render_empty_state() -> None:
         "2. `data/raw/`에 저장합니다.\n"
         "3. 아래 명령으로 적재합니다.\n\n"
         '`python scripts/ingest_excel.py --file "data/raw/infomax_raw.xlsx"`\n\n'
-        "또는 사이드바 **엑셀 업로드**에서 Excel을 업로드한 뒤 "
-        "**Excel을 SQLite에 적재**를 누르세요.\n\n"
         "본 대시보드는 실시간 데이터가 아닌 **전일 확정 종가**만 사용합니다."
     )
 
 
-def sidebar_controls(status: dict) -> dict:
+def sidebar_controls() -> dict:
     st.sidebar.header("분석 설정")
 
     if st.sidebar.button("⟲ 새로고침", use_container_width=True):
@@ -174,32 +170,6 @@ def sidebar_controls(status: dict) -> dict:
             use_container_width=True,
             on_click=_restore_default_vars,
         )
-    with st.sidebar.expander("엑셀 업로드", expanded=False):
-        uploaded = st.file_uploader("Infomax Excel", type=["xlsx", "xls"])
-        st.caption(f"DB 경로: {DEFAULT_DB_PATH}")
-        last_ing = status.get("last_ingestion") or {}
-        st.caption(f"최근 파일: {Path(str(last_ing.get('source_file', '—'))).name}")
-        st.caption(f"최근 적재: {last_ing.get('completed_at') or last_ing.get('started_at') or '—'}")
-        if uploaded is not None and st.button("Excel을 SQLite에 적재", use_container_width=True):
-            try:
-                DEFAULT_RAW_DIR.mkdir(parents=True, exist_ok=True)
-                ts = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
-                dest = DEFAULT_RAW_DIR / f"upload_{ts}_{uploaded.name}"
-                dest.write_bytes(uploaded.getvalue())
-                result = ingest_excel(dest, db_path=DEFAULT_DB_PATH, replace=False)
-                st.cache_data.clear()
-                st.success(
-                    f"적재 완료: 신규 {result['inserted_rows']} / 갱신 {result['updated_rows']}"
-                )
-                if result["missing_sheets"]:
-                    st.warning("누락 시트: " + ", ".join(result["missing_sheets"]))
-                st.rerun()
-            except IngestionError as exc:
-                logger.exception("Upload ingest failed")
-                st.error(_safe_message(exc))
-            except Exception as exc:
-                logger.exception("Upload ingest failed")
-                st.error(f"적재 중 오류가 발생했습니다: {_safe_message(exc)}")
 
     selected_ids = [
         all_options[n]
@@ -283,7 +253,7 @@ def main() -> None:
         st.error(f"데이터베이스 상태를 확인할 수 없습니다: {_safe_message(exc)}")
         return
 
-    controls = sidebar_controls(status)
+    controls = sidebar_controls()
 
     if not status.get("db_exists") or not status.get("market_data_exists") or not status.get("usdkrw_latest_date"):
         render_empty_state()
