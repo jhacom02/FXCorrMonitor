@@ -572,8 +572,15 @@ def driver_timeline_chart(
             avg_s_txt = "—"
         elif did == "MIXED":
             driver_txt = str(row["driver_name"])
-            avg_abs_txt = "—"
-            avg_s_txt = "—"
+
+            def _fmt_pair(v1: Any, v2: Any) -> str:
+                def one(v: Any) -> str:
+                    return "—" if v is None or pd.isna(v) else f"{float(v):.2f}"
+
+                return f"{one(v1)}, {one(v2)}"
+
+            avg_abs_txt = _fmt_pair(row.get("mix_avg_abs_1"), row.get("mix_avg_abs_2"))
+            avg_s_txt = _fmt_pair(row.get("mix_avg_signed_1"), row.get("mix_avg_signed_2"))
         else:
             driver_txt = str(row["driver_name"])
             avg_abs = row["average_abs_correlation"]

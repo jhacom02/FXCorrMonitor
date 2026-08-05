@@ -118,20 +118,32 @@ def assign_daily_drivers(
     min_score: float,
     mixed_gap: float = MIXED_SCORE_GAP,
 ) -> pd.DataFrame:
+    empty_cols = [
+        "date",
+        "driver_id",
+        "driver_name",
+        "signed_correlation",
+        "abs_correlation",
+        "mix_signed_1",
+        "mix_abs_1",
+        "mix_signed_2",
+        "mix_abs_2",
+    ]
     if corr_long.empty:
-        return pd.DataFrame(
-            columns=[
-                "date",
-                "driver_id",
-                "driver_name",
-                "signed_correlation",
-                "abs_correlation",
-            ]
-        )
+        return pd.DataFrame(columns=empty_cols)
+
+    def _blank_mix() -> dict[str, Any]:
+        return {
+            "mix_signed_1": np.nan,
+            "mix_abs_1": np.nan,
+            "mix_signed_2": np.nan,
+            "mix_abs_2": np.nan,
+        }
 
     records: list[dict[str, Any]] = []
     for dt, grp in corr_long.groupby("date"):
         valid = grp.dropna(subset=["abs_correlation"]).copy()
+        mix = _blank_mix()
         if valid.empty:
             records.append(
                 {
@@ -140,6 +152,7 @@ def assign_daily_drivers(
                     "driver_name": DRIVER_NONE_NAME,
                     "signed_correlation": np.nan,
                     "abs_correlation": np.nan,
+                    **mix,
                 }
             )
             continue
@@ -162,6 +175,18 @@ def assign_daily_drivers(
             name = f"혼합({n1}, {n2})"
             signed = np.nan
             abs_c = np.nan
+            mix = {
+                "mix_signed_1": (
+                    float(top["rolling_correlation"]) if pd.notna(top["rolling_correlation"]) else np.nan
+                ),
+                "mix_abs_1": top_abs,
+                "mix_signed_2": (
+                    float(second["rolling_correlation"])
+                    if pd.notna(second["rolling_correlation"])
+                    else np.nan
+                ),
+                "mix_abs_2": second_abs,
+            }
         else:
             driver_id = str(top["instrument_id"])
             name = _display_for_driver(driver_id)
@@ -175,6 +200,7 @@ def assign_daily_drivers(
                 "driver_name": name,
                 "signed_correlation": signed,
                 "abs_correlation": abs_c,
+                **mix,
             }
         )
 
@@ -327,10 +353,18 @@ def compress_driver_regimes(daily_drivers: pd.DataFrame) -> pd.DataFrame:
                 "min_signed_correlation",
                 "max_signed_correlation",
                 "max_abs_correlation",
+                "mix_avg_signed_1",
+                "mix_avg_abs_1",
+                "mix_avg_signed_2",
+                "mix_avg_abs_2",
             ]
         )
 
     absorbed = _absorb_single_day_regimes(daily_drivers)
+    for col in ("mix_signed_1", "mix_abs_1", "mix_signed_2", "mix_abs_2"):
+        if col not in absorbed.columns:
+            absorbed[col] = np.nan
+
     regimes: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
 
@@ -345,11 +379,19 @@ def compress_driver_regimes(daily_drivers: pd.DataFrame) -> pd.DataFrame:
                 "dates": [row["date"]],
                 "signed": [row["signed_correlation"]],
                 "abs": [row["abs_correlation"]],
+                "mix_signed_1": [row["mix_signed_1"]],
+                "mix_abs_1": [row["mix_abs_1"]],
+                "mix_signed_2": [row["mix_signed_2"]],
+                "mix_abs_2": [row["mix_abs_2"]],
             }
         else:
             current["dates"].append(row["date"])
             current["signed"].append(row["signed_correlation"])
             current["abs"].append(row["abs_correlation"])
+            current["mix_signed_1"].append(row["mix_signed_1"])
+            current["mix_abs_1"].append(row["mix_abs_1"])
+            current["mix_signed_2"].append(row["mix_signed_2"])
+            current["mix_abs_2"].append(row["mix_abs_2"])
 
     if current is not None:
         regimes.append(_finalize_regime(current))
@@ -360,9 +402,15 @@ def compress_driver_regimes(daily_drivers: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _nanmean_list(values: list[Any]) -> float:
+    s = pd.Series(values, dtype=float)
+    return float(s.mean()) if s.notna().any() else np.nan
+
+
 def _finalize_regime(current: dict[str, Any]) -> dict[str, Any]:
     signed = pd.Series(current["signed"], dtype=float)
     abs_s = pd.Series(current["abs"], dtype=float)
+    is_mixed = current["driver_id"] == DRIVER_MIXED
     return {
         "start_date": pd.Timestamp(current["dates"][0]).normalize(),
         "end_date": pd.Timestamp(current["dates"][-1]).normalize(),
@@ -374,7 +422,30 @@ def _finalize_regime(current: dict[str, Any]) -> dict[str, Any]:
         "min_signed_correlation": float(signed.min()) if signed.notna().any() else np.nan,
         "max_signed_correlation": float(signed.max()) if signed.notna().any() else np.nan,
         "max_abs_correlation": float(abs_s.max()) if abs_s.notna().any() else np.nan,
+        "mix_avg_signed_1": _nanmean_list(current["mix_signed_1"]) if is_mixed else np.nan,
+        "mix_avg_abs_1": _nanmean_list(current["mix_abs_1"]) if is_mixed else np.nan,
+        "mix_avg_signed_2": _nanmean_list(current["mix_signed_2"]) if is_mixed else np.nan,
+        "mix_avg_abs_2": _nanmean_list(current["mix_abs_2"]) if is_mixed else np.nan,
     }
+
+
+def regime_label_on_date(regimes: pd.DataFrame, as_of: pd.Timestamp) -> str:
+    if regimes is None or regimes.empty:
+        return "—"
+    as_of_ts = pd.Timestamp(as_of).normalize()
+    df = regimes.copy()
+    df["start_date"] = pd.to_datetime(df["start_date"]).dt.normalize()
+    df["end_date"] = pd.to_datetime(df["end_date"]).dt.normalize()
+    hit = df[(df["start_date"] <= as_of_ts) & (df["end_date"] >= as_of_ts)]
+    if hit.empty:
+        return "—"
+    row = hit.iloc[0]
+    if str(row["driver_id"]) == DRIVER_NONE:
+        return "—"
+    name = row["driver_name"]
+    if name is None or (isinstance(name, float) and pd.isna(name)):
+        return "—"
+    return str(name)
 
 
 def build_driver_ranking(

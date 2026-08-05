@@ -38,6 +38,7 @@ from src.analytics import (
     latest_top_driver,
     multi_window_correlations,
     regimes_for_window,
+    regime_label_on_date,
 )
 from src.database import get_db_status, load_market_data
 from src.ingestion import IngestionError, ingest_excel
@@ -528,10 +529,19 @@ def main() -> None:
 
         # --- Timeline ---
         st.markdown('<div class="fx-section-title">주도변수 타임라인</div>', unsafe_allow_html=True)
-        st.caption("주도변수가 없거나 평균 |ρ|가 유의 미만이면 회색, 주도변수 2개 이상의 혼합 국면이면 앰버로 표시합니다.")
+        st.caption("주도변수가 없거나 평균 |ρ|가 임계점 미만이면 회색, 주도변수 2개 이상의 혼합 국면이면 앰버로 표시합니다.")
         x_range = [start, end + pd.Timedelta(days=1)]
+        as_of_tl = transformed.index.max()
+        timeline_regimes: list[tuple[str, pd.DataFrame]] = []
         for w, label in zip(ANALYSIS_WINDOWS, ("20D", "60D", "120D")):
-            regimes_w = regimes_for_window(transformed, selected_drivers, w)
+            timeline_regimes.append(
+                (label, regimes_for_window(transformed, selected_drivers, w))
+            )
+        today_parts = [
+            f"[{label}] {regime_label_on_date(reg, as_of_tl)}" for label, reg in timeline_regimes
+        ]
+        st.caption("오늘자 국면: " + ", ".join(today_parts))
+        for (label, regimes_w), w in zip(timeline_regimes, ANALYSIS_WINDOWS):
             st.plotly_chart(
                 driver_timeline_chart(
                     regimes_w,

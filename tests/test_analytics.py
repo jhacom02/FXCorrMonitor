@@ -24,6 +24,7 @@ from src.analytics import (
     compress_driver_regimes,
     latest_top_driver,
     min_periods_for_window,
+    regime_label_on_date,
 )
 
 
@@ -106,6 +107,19 @@ def test_mixed_regime_when_gap_small():
     daily = assign_daily_drivers(pd.DataFrame(rows), min_score=sig_abs(20))
     assert daily.iloc[-1]["driver_id"] == DRIVER_MIXED
     assert daily.iloc[-1]["driver_name"] == "혼합(DXY, USDCNH)"
+    assert abs(float(daily.iloc[-1]["mix_abs_1"]) - 0.55) < 1e-9
+    assert abs(float(daily.iloc[-1]["mix_abs_2"]) - 0.52) < 1e-9
+    assert abs(float(daily.iloc[-1]["mix_signed_1"]) - 0.55) < 1e-9
+    assert abs(float(daily.iloc[-1]["mix_signed_2"]) - 0.52) < 1e-9
+
+    regimes = compress_driver_regimes(daily)
+    assert len(regimes) == 1
+    assert regimes.iloc[0]["driver_id"] == DRIVER_MIXED
+    assert abs(float(regimes.iloc[0]["mix_avg_abs_1"]) - 0.55) < 1e-9
+    assert abs(float(regimes.iloc[0]["mix_avg_abs_2"]) - 0.52) < 1e-9
+    assert abs(float(regimes.iloc[0]["mix_avg_signed_1"]) - 0.55) < 1e-9
+    as_of = dates[-1]
+    assert regime_label_on_date(regimes, as_of) == "혼합(DXY, USDCNH)"
 
 
 def test_none_when_abs_below_threshold():
@@ -263,6 +277,21 @@ def test_classify_driver_status_cases():
     assert classify_driver_status(0.5, 0.48, 0.45) == "지속"
     assert classify_driver_status(0.5, -0.1, 0.0) == "신규"
     assert classify_driver_status(0.55, -0.35, 0.2) == "전환"
+
+
+def test_regime_label_on_date_none_is_dash():
+    dates = pd.date_range("2024-06-01", periods=3, freq="B")
+    daily = pd.DataFrame(
+        {
+            "date": dates,
+            "driver_id": [DRIVER_NONE] * 3,
+            "driver_name": [DRIVER_NONE_NAME] * 3,
+            "signed_correlation": [np.nan] * 3,
+            "abs_correlation": [np.nan] * 3,
+        }
+    )
+    regimes = compress_driver_regimes(daily)
+    assert regime_label_on_date(regimes, dates[-1]) == "—"
 
 
 def test_sig_abs_and_display_floor():
