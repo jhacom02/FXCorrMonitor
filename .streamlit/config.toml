@@ -1,7 +1,5 @@
 [server]
-port = 8502
-address = "0.0.0.0"
-headless = false
+headless = true
 
 [theme]
 base = "dark"
