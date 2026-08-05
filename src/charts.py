@@ -44,6 +44,11 @@ INSET_LEGEND = dict(
     borderwidth=0,
 )
 
+DETAIL_INSET_LEGEND = {
+    **INSET_LEGEND,
+    "x": 0.93,
+}
+
 CHART_SUBTITLE = dict(font=dict(size=15), x=0.5, xanchor="center")
 
 DISPLAY_MODE_TOP3 = "top_3"
@@ -761,7 +766,7 @@ def dual_raw_level_chart(
         margin=margin,
         height=height,
         hovermode="x unified",
-        legend=INSET_LEGEND,
+        legend=DETAIL_INSET_LEGEND,
         xaxis=dict(title="", gridcolor=grid, tickformat="%Y-%m", hoverformat="%Y-%m-%d"),
     )
     if title:
@@ -841,7 +846,7 @@ def indexed_level_chart(
         margin=margin,
         height=height,
         hovermode="x unified",
-        legend=INSET_LEGEND,
+        legend=DETAIL_INSET_LEGEND,
         xaxis=dict(title="", gridcolor=grid, tickformat="%Y-%m", hoverformat="%Y-%m-%d"),
     )
     if title:

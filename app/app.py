@@ -398,7 +398,7 @@ def main() -> None:
 
         # --- Rolling chart ---
         st.markdown('<div class="fx-section-title">롤링 상관계수</div>', unsafe_allow_html=True)
-        st.caption("최근 롤링 상관계수 기준 상위 N개 시장변수를 표시합니다.")
+        st.caption("최근 롤링 상관계수 기준 상위 N개 시장변수를 표시합니다. 전역 임계값 이상인 변수만 표시합니다.")
 
         if "roll_window_label" not in st.session_state:
             st.session_state["roll_window_label"] = "20D"
