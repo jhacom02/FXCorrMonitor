@@ -2,27 +2,43 @@
 
 USDKRW와 주요 시장변수 간 롤링 상관관계 및 시기별 주도변수 변화를 모니터링합니다.
 
-인포맥스에서 수동 추출한 Excel을 SQLite에 적재하고, Streamlit이 SQLite만 조회합니다. LLM·외부 AI API·실시간 시세 API는 사용하지 않습니다.
+인포맥스에서 수동 추출한 Excel을 SQLite에 적재하고, Streamlit이 그 DB만 조회하는 **정적 대시보드**입니다. 실시간 시세·외부 AI API는 사용하지 않습니다.
+
+> 상관관계는 동행을 나타낼 뿐, **인과관계를 의미하지 않습니다.**
 
 ## 프로젝트 목적
 
-1. 현재 USDKRW 일간 변동과 가장 강하게 동행하는 변수는 무엇인가
-2. USDKRW와 각 변수의 상관관계가 시기별로 어떻게 변했는가
-3. 20·60·120일 기준으로 주도 변수가 어떻게 달라지는가
-4. 달러·위안·국내주식·위험회피·금리·원자재 중 어떤 요인이 현재 USDKRW를 주도하는가
+딜링룸·리서치에서 아래 질문에 빠르게 답하기 위한 모니터입니다.
 
-> **주도 변수**는 인과관계가 아닙니다. 선택한 기간의 **절대 롤링 상관계수**가 가장 높은 변수로 정의합니다.
+1. **지금** USDKRW 일간 변동과 가장 강하게 동행하는 변수는 무엇인가  
+2. 그 상관관계가 **시기별로** 어떻게 변해 왔는가  
+3. **20·60·120일** 창에서 주도 변수 해석이 어떻게 달라지는가  
 
-## 정적 대시보드 운영 원칙
+여기서 **주도변수**는 인과가 아니라, 선택한 롤링 창에서 USDKRW와의 **절대 상관계수(|ρ|)가 가장 큰 변수**로 정의합니다.
 
-- 전일 **확정 종가**만 사용합니다. 당일 장중 현재가는 분석에 포함하지 않습니다.
-- 분석 기준일(`analysis_as_of_date`)은 DB 내 USDKRW 최신 확정일입니다.
-- 시차 정렬은 **서울환시 기준**으로 고정합니다. `previous_us_close` 변수는 **직전 미국 종가 → 다음 서울환시 거래일**로 연결하고, `same_day` 변수는 동일 일자로 맞춥니다.
-- 대시보드는 인포맥스 Excel 실행 여부와 무관하게 **SQLite만** 조회합니다.
-- Excel 파일 감시·실시간 셀 연동은 구현하지 않습니다. 데이터 갱신은 적재 스크립트 또는 UI의 **SQLite 업데이트** 버튼 시에만 수행됩니다.
-- 동일 DB 상태·동일 분석 기준일·동일 파라미터면 결과가 재현됩니다.
+## 주요 기능
 
-## 설치 및 실행
+| 화면 | 역할 |
+|------|------|
+| KPI | 당일 20D 기준 주도변수·환율 등 요약 |
+| 롤링 상관계수 | 20/60/120D 시계열, Top-N 표시·주도 강조 |
+| 주도변수 랭킹 | 20/60/120D ρ와 신규·전환·강화·약화·지속 국면 |
+| 상관계수 히트맵 | 변수×윈도우 |ρ| 한눈에 비교 |
+| 주도변수 타임라인 | 시기별 주도·혼합·유의 미만 구간 색 표시 |
+| 변수별 상세 | 원본(이중축)·지수화(분석 시작일=100) 비교 |
+| 데이터 품질 | 커버리지·이상치 후보 |
+
+공통 원칙:
+
+- **전일 확정 종가**만 사용 (장중 현재가 제외)
+- 시차 정렬은 **서울환시** 기준 (`same_day` / `previous_us_close`)
+- 가격·지수는 로그수익, 금리는 bp 차분, 수급은 레벨로 변환 후 상관 계산
+
+## 기술 스택
+
+Python 3.11+, pandas, NumPy, SQLite, Streamlit, Plotly
+
+## 빠른 시작
 
 ```bash
 python -m venv .venv
@@ -33,124 +49,37 @@ Windows:
 ```bash
 .venv\Scripts\activate
 pip install -r requirements.txt
-```
-
-Excel 적재:
-
-```bash
+python main.py init-db
 python scripts/ingest_excel.py --file "data/raw/infomax_raw.xlsx"
-```
-
-또는:
-
-```bash
-python main.py ingest --file "data/raw/infomax_raw.xlsx"
-```
-
-대시보드:
-
-```bash
-streamlit run app/app.py
-# 또는
-python main.py run
+streamlit run app/app.py --server.port 8502
 ```
 
 - 로컬: [http://localhost:8502](http://localhost:8502)
-- 사내망: `http://<서버IP>:8502` (`.streamlit/config.toml`에서 `address = "0.0.0.0"`, 포트 8502·방화벽 인바운드 필요)
-
-테스트:
+- 데모: [https://fxcorrmonitor.streamlit.app](https://fxcorrmonitor.streamlit.app)
 
 ```bash
 pytest
 ```
 
-## Excel 구조
+## 데이터·설정
 
-인포맥스 추출 파일은 여러 시트로 구성됩니다.
-
-- 1행: 메타데이터 (시작/종료/`종목코드`)
-- 2행: 종목명
-- 3행: 열 이름 → `pandas.read_excel(..., header=2)`
-- 4행~: 데이터
-
-시트는 `종목코드`로 우선 매칭하고, 실패·모호 시에만 정규화 시트명(`_\d+` suffix 제거)으로 fallback합니다. `market_data.source_sheet`에는 원본 시트명(suffix 포함)을 기록합니다.
-
-날짜는 datetime 또는 Excel serial(`origin=1899-12-30`)을 모두 지원합니다. 동일 날짜는 마지막 값을 사용합니다.
-
-종목·시트·열 매핑은 [`config/instruments.py`](config/instruments.py)에 정의되어 있습니다. 연결선물 월물이 바뀌어 시트명이 변경되면 이 설정을 갱신해야 합니다.
-
-## SQLite 구조
-
-기본 경로: `data/fx_dashboard.db`
-
-| 테이블 | 역할 |
-|--------|------|
-| `instruments` | 종목 메타 |
-| `market_data` | 일별 원자료 (`date`, `instrument_id`, `raw_value`) UPSERT |
-| `ingestion_log` | 적재 성공/실패 로그 |
-
-파생 수익률·상관계수는 DB에 저장하지 않고 조회 시 계산합니다.
-
-## Streamlit 구조
-
-- 진입점: [`app/app.py`](app/app.py)
-- 스타일: [`app/styles.css`](app/styles.css)
-- 오케스트레이션: [`main.py`](main.py)
-
-화면: 상단 상태 배너(분석 기준일·확정 종가·최종 적재) → KPI → 롤링 상관 차트 → 랭킹 → 히트맵 → 주도 변수 타임라인 → 변수 상세 → 데이터 품질
-
-기본 화면의 공통 표시 필터는 사이드바 `|ρ|`(기본 0.30)이다. 롤링 차트는 `max(사이드바, 윈도우별 통계 유의선)`을 쓴다. 히트맵 채도는 윈도우 유의선만 쓴다 (20D 0.44 / 60D 0.25 / 120D 0.18). 주도 변수 랭킹은 사이드바 임계 없이 선택 변수 전체를 `|20D ρ|` 순으로 표시한다. KPI·차트 굵은 선·주도 국면·타임라인 흐림·상태 열은 `sig_abs(W)`만 사용한다. KPI는 항상 20D 당일 `|ρ|` 1위(≥0.44). 임계는 [`config/thresholds.py`](config/thresholds.py)에서 관리한다.
-
-## 테스트 구조
-
-| 파일 | 범위 |
+| 항목 | 설명 |
 |------|------|
-| `tests/test_ingestion.py` | 날짜 변환, UPSERT, USDKRW 필수 |
-| `tests/test_transformation.py` | 로그수익·bp·level·ffill 금지·시차 정렬 |
-| `tests/test_analytics.py` | 롤링 상관·주도 변수·국면 압축 |
+| 입력 | 인포맥스 Excel (시트별 종목) |
+| 저장 | SQLite `data/fx_dashboard.db` |
+| 종목 매핑 | [`config/instruments.py`](config/instruments.py) |
+| 유의선·필터 | [`config/thresholds.py`](config/thresholds.py) (예: 20D 0.44 / 60D 0.25 / 120D 0.18) |
 
-## 데이터 변환 원칙
+파생 수익률·상관계수는 DB에 넣지 않고, 대시보드 조회 시 계산합니다.
 
-| 유형 | 변환 |
-|------|------|
-| 가격/지수 | `log_return = ln(v_t / v_{t-1})` |
-| 금리 | `diff_bp = (y_t - y_{t-1}) * 100` |
-| 수급(F_NET) | 일별 원자료 level 유지 |
-
-- forward fill 금지
-- 휴장일 임의 복제 금지
-- `±inf` → NaN, 결측을 0으로 대체하지 않음
-- 인포맥스 `전일대비` / `KR_MID_Chg` / `MID_Chg` 열은 사용하지 않음
-
-## 롤링 상관계수 계산 원칙
-
-- 기준: USDKRW 로그수익률
-- Pearson rolling correlation
-- 기본 윈도우: 20 / 60 / 120 (사용자 10–252)
-- `min_periods = ceil(window * 0.8)` (20→16, 60→48, 120→96)
-- 두 변수 모두 값이 있는 날짜만 사용
-- 부호를 임의로 뒤집지 않음 (EURUSD 포함)
-
-## 주도 변수 표시 원칙
-
-1. KPI·롤링 차트 강조: 당일 롤링 `|ρ|` 1위 (`latest_top_driver`; 혼합 없음). KPI는 20D 고정.
-2. 1위 `|ρ|` &lt; `sig_abs(W)` (20D 0.44 / 60D 0.25 / 120D 0.18) → 없음(—)
-3. 주도 변수 타임라인만 일별 배정+국면 압축: 1·2위 격차 &lt; 0.05 → 혼합; 1거래일 구간은 직전 국면으로 연장(맨 앞만 직후)
-4. 그 외(타임라인) 1위 변수
-
-화면에는 항상 “상관관계는 인과관계를 의미하지 않는다”는 주석을 표시합니다.
-
-## 디렉터리
+## 디렉터리 요약
 
 ```
 FXCorrMonitor/
-├─ main.py
-├─ app/app.py
-├─ app/styles.css
-├─ config/instruments.py
-├─ config/thresholds.py
-├─ data/raw/
-├─ scripts/ingest_excel.py
-├─ src/
-└─ tests/
+├─ app/           # Streamlit UI·CSS
+├─ config/        # 종목·임계값
+├─ src/           # 적재·변환·분석·차트
+├─ scripts/       # Excel 적재 CLI
+├─ tests/
+└─ main.py        # init-db / ingest / run
 ```
