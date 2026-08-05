@@ -303,3 +303,83 @@ def test_sig_abs_and_display_floor():
     assert display_floor(20, DISPLAY_MIN_ABS_DEFAULT) == sig_abs(20)
     assert display_floor(60, DISPLAY_MIN_ABS_DEFAULT) == DISPLAY_MIN_ABS_DEFAULT
     assert display_floor(120, 0.10) == sig_abs(120)
+
+
+def test_robust_z_excludes_current_and_needs_252():
+    from config.thresholds import MAD_NORMAL_SCALE, ROBUST_Z_WINDOW
+    from src.analytics import _robust_z_series
+
+    n = ROBUST_Z_WINDOW + 5
+    idx = pd.date_range("2015-01-01", periods=n, freq="B")
+    base = np.full(n, 0.001)
+    # mild dispersion so MAD > 0
+    base[::2] = -0.001
+    s = pd.Series(base, index=idx)
+    s.iloc[-1] = 0.10
+
+    z = _robust_z_series(s)
+    assert z.iloc[:ROBUST_Z_WINDOW].isna().all()
+
+    prior = s.iloc[-(ROBUST_Z_WINDOW + 1) : -1].to_numpy()
+    med = float(np.median(prior))
+    mad = float(np.median(np.abs(prior - med)))
+    expected = (float(s.iloc[-1]) - med) / (MAD_NORMAL_SCALE * mad)
+    assert z.iloc[-1] == pytest.approx(expected)
+
+    # Changing x_t must not change median/MAD used for that day
+    s2 = s.copy()
+    s2.iloc[-1] = 0.20
+    z2 = _robust_z_series(s2)
+    expected2 = (0.20 - med) / (MAD_NORMAL_SCALE * mad)
+    assert z2.iloc[-1] == pytest.approx(expected2)
+
+
+def test_detect_historical_shocks_dual_gate_and_display_filter():
+    from config.thresholds import ROBUST_Z_WINDOW, SHOCK_ABS_FLOOR
+    from src.analytics import detect_historical_shocks
+
+    n = ROBUST_Z_WINDOW + 10
+    idx = pd.date_range("2015-01-01", periods=n, freq="B")
+
+    # Low-vol history: MAD small → modest moves get large z
+    low_vol = np.full(n, 0.001)
+    low_vol[::2] = -0.001
+    dxy_low = low_vol.copy()
+    dxy_low[-3] = 0.08  # z high + above floor → shock
+    dxy_low[-2] = 0.015  # z high but below floor 0.02 → not shock
+
+    # High-vol history: MAD large → 0.05 clears floor but z < 4
+    high_vol = np.full(n, 0.02)
+    high_vol[::2] = -0.02
+    dxy_high = high_vol.copy()
+    dxy_high[-1] = 0.05  # above floor, z too small
+
+    hits_low = detect_historical_shocks(pd.DataFrame({"DXY": dxy_low}, index=idx))
+    dates_low = set(hits_low["date"]) if not hits_low.empty else set()
+    assert idx[-3].date().isoformat() in dates_low
+    assert idx[-2].date().isoformat() not in dates_low
+
+    hits_high = detect_historical_shocks(pd.DataFrame({"DXY": dxy_high}, index=idx))
+    dates_high = set(hits_high["date"]) if not hits_high.empty else set()
+    assert idx[-1].date().isoformat() not in dates_high
+
+    # F_NET has no floor → never included
+    mixed = detect_historical_shocks(
+        pd.DataFrame({"DXY": dxy_low, "F_NET": low_vol}, index=idx)
+    )
+    assert "F_NET" not in set(mixed["instrument_id"])
+
+    filtered = detect_historical_shocks(
+        pd.DataFrame({"DXY": dxy_low}, index=idx),
+        display_start=idx[-5],
+        display_end=idx[-1],
+    )
+    assert idx[-3].date().isoformat() in set(filtered["date"])
+    early_only = detect_historical_shocks(
+        pd.DataFrame({"DXY": dxy_low}, index=idx),
+        display_start=idx[-2],
+        display_end=idx[-1],
+    )
+    early_dates = set(early_only["date"]) if not early_only.empty else set()
+    assert idx[-3].date().isoformat() not in early_dates
+    assert SHOCK_ABS_FLOOR["DXY"] == 0.02

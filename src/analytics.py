@@ -10,12 +10,13 @@ import pandas as pd
 
 from config.instruments import INSTRUMENT_BY_ID, TARGET_ID
 from config.thresholds import (
-    ABNORMAL_LOG_RETURN,
-    ABNORMAL_VIX_LOG_RETURN,
-    ABNORMAL_YIELD_BP,
     ANALYSIS_WINDOWS,
+    MAD_NORMAL_SCALE,
     MIN_PERIOD_RATIO,
     MIXED_SCORE_GAP,
+    ROBUST_Z_ABS_MIN,
+    ROBUST_Z_WINDOW,
+    SHOCK_ABS_FLOOR,
     STATUS_ABS_DELTA,
     sig_abs,
 )
@@ -542,47 +543,87 @@ def multi_window_correlations(
     return pd.DataFrame(records)
 
 
-def detect_abnormal_returns(
+def _rolling_mad(prior: pd.Series, window: int) -> pd.Series:
+    """MAD of each prior window about that window's own median."""
+
+    def _mad(arr: np.ndarray) -> float:
+        med = float(np.median(arr))
+        return float(np.median(np.abs(arr - med)))
+
+    return prior.rolling(window=window, min_periods=window).apply(_mad, raw=True)
+
+
+def _robust_z_series(x: pd.Series, window: int = ROBUST_Z_WINDOW) -> pd.Series:
+    """Prior-window robust z-score; x_t is excluded from median/MAD (no look-ahead)."""
+    prior = x.shift(1)
+    rolling_median = prior.rolling(window=window, min_periods=window).median()
+    rolling_mad = _rolling_mad(prior, window)
+    robust_sigma = MAD_NORMAL_SCALE * rolling_mad
+    z = (x - rolling_median) / robust_sigma
+    z = z.where(robust_sigma > 0)
+    return z
+
+
+def detect_historical_shocks(
     transformed_wide: pd.DataFrame,
-    raw_aligned_wide: pd.DataFrame | None = None,
+    display_start: pd.Timestamp | None = None,
+    display_end: pd.Timestamp | None = None,
 ) -> pd.DataFrame:
+    """Flag historical shock days via prior-252 robust z and absolute move floors.
+
+    Z-scores are computed on the full series of valid observations per instrument;
+    only the returned rows are filtered to ``[display_start, display_end]`` when
+    those bounds are provided.
+    """
     rows: list[dict[str, Any]] = []
     if transformed_wide.empty:
         return pd.DataFrame()
 
+    start = pd.Timestamp(display_start) if display_start is not None else None
+    end = pd.Timestamp(display_end) if display_end is not None else None
+
     for iid in transformed_wide.columns:
+        floor = SHOCK_ABS_FLOOR.get(iid)
+        if floor is None:
+            continue
         inst = INSTRUMENT_BY_ID.get(iid)
         if inst is None:
             continue
-        s = transformed_wide[iid].dropna()
-        if s.empty:
-            continue
-
         if inst.transformation == "diff_bp":
-            thresh = ABNORMAL_YIELD_BP
-            mask = s.abs() > thresh
             unit = "bp"
-        elif iid == "VIX":
-            thresh = ABNORMAL_VIX_LOG_RETURN
-            mask = s.abs() > thresh
-            unit = "log_return"
         elif inst.transformation == "log_return":
-            thresh = ABNORMAL_LOG_RETURN
-            mask = s.abs() > thresh
             unit = "log_return"
         else:
             continue
 
-        flagged = s[mask]
-        for dt, val in flagged.items():
+        s = transformed_wide[iid].dropna()
+        if s.empty:
+            continue
+        z = _robust_z_series(s)
+        mask = z.abs() >= ROBUST_Z_ABS_MIN
+        mask &= s.abs() >= floor
+        mask &= z.notna()
+        if start is not None:
+            mask &= s.index >= start
+        if end is not None:
+            mask &= s.index <= end
+
+        flagged_idx = s.index[mask]
+        for dt in flagged_idx:
             rows.append(
                 {
                     "date": pd.Timestamp(dt).date().isoformat(),
                     "instrument_id": iid,
                     "display_name": inst.display_name,
-                    "value": float(val),
-                    "threshold": thresh,
+                    "value": float(s.loc[dt]),
+                    "robust_z": float(z.loc[dt]),
+                    "abs_threshold": float(floor),
                     "unit": unit,
                 }
             )
-    return pd.DataFrame(rows).sort_values(["date", "instrument_id"], ascending=[False, True]) if rows else pd.DataFrame()
+
+    if not rows:
+        return pd.DataFrame()
+    return pd.DataFrame(rows).sort_values(
+        ["date", "instrument_id"], ascending=[False, True]
+    ).reset_index(drop=True)

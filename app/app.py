@@ -21,9 +21,6 @@ from config.instruments import (
     get_driver_instruments,
 )
 from config.thresholds import (
-    ABNORMAL_LOG_RETURN,
-    ABNORMAL_VIX_LOG_RETURN,
-    ABNORMAL_YIELD_BP,
     ANALYSIS_WINDOWS,
     DISPLAY_MIN_ABS_DEFAULT,
     display_floor,
@@ -34,7 +31,7 @@ from src.analytics import (
     DRIVER_NONE,
     calculate_rolling_correlations,
     classify_driver_status,
-    detect_abnormal_returns,
+    detect_historical_shocks,
     latest_top_driver,
     multi_window_correlations,
     regimes_for_window,
@@ -351,8 +348,10 @@ def main() -> None:
 <li>Pearson 롤링 상관계수(20D/60D/120D, min_periods≈80%)를 계산합니다.</li>
 <li>높은 상관은 동행을 의미하며, 인과관계를 의미하지 않습니다.</li>
 <hr>
-<li>전역 상관계수 임계값: 기본값 0.30. 사이드바에서 설정 가능.</li>
-<li>윈도우 상관계수 임계값: |20D ρ| ≥ 0.44 / |60D ρ| ≥ 0.25 / |120D ρ| ≥ 0.18.</li>
+<li>전역 상관계수 임계값: 0.30 (사이드바에서 설정 가능)</li>
+<li>윈도우 상관계수 임계값: |20D ρ| ≥ 0.44 / |60D ρ| ≥ 0.25 / |120D ρ| ≥ 0.18</li>
+<li>역사적 충격 robust z-score: |robust z| ≥ 4
+<li>역사적 충격 절대하한: |통화| ≥ 2% / |주가| ≥ 5% / |VIX| ≥ 30% / |WTI| ≥ 15% / |GOLD| ≥ 3% / |금리| ≥ 25bp</li>
 <hr>
 <li>[KPI 카드] |20D ρ| 기준 1위 변수만 표시. 윈도우 임계값 이상일 때만 표시.</li>
 <li>[롤링 상관계수] 차트에 max(전역 임계값, 윈도우 임계값) 이상인 변수만 표시.</li>
@@ -360,6 +359,8 @@ def main() -> None:
 <li>[상관계수 히트맵] 변수 전체 표시. |20D ρ| 내림차순 정렬. 윈도우 임계값 미만이면 흐림.</li>
 <li>[주도변수 타임라인] 시기별 주도/혼합 국면 표시. 주도 없음은 회색, 혼합은 앰버로 표시.</li>
 <li>[변수별 상세 분석] 원본값 비교 차트는 이중축, 지수화 비교 차트는 단일축 (분석 시작일=100).</li>
+<li>[역사적 충격일] 직전 252거래일 robust z-score & 자산별 절대하한 함께 적용.</li>
+<li>[데이터 품질] 결측률 표시.</li>
 </ul>
 </div>
                 """,
@@ -601,6 +602,7 @@ def main() -> None:
             st.markdown(
                 f"""
 <div class="fx-detail-panel">
+<div>[USDKRW vs {inst.display_name}]</div>
 <ul>
 <li>20D ρ: {format_corr(m20)}</li>
 <li>60D ρ: {format_corr(m60)}</li>
@@ -614,6 +616,42 @@ def main() -> None:
 <br>
                 """,
                 unsafe_allow_html=True,
+            )
+
+        st.markdown('<div class="fx-section-title">역사적 충격일</div>', unsafe_allow_html=True)
+        st.caption(
+            "최근 252거래일 변동성을 반영한 robust z-score와 자산별 절대하한을 함께 적용합니다."
+        )
+        shocks = detect_historical_shocks(
+            frame["transformed_wide"],
+            display_start=start,
+            display_end=end,
+        )
+        if shocks.empty:
+            st.caption("조건을 충족하는 충격일이 없습니다.")
+        else:
+            show_rows: list[dict] = []
+            for _, r in shocks.iterrows():
+                unit = str(r["unit"])
+                val = float(r["value"])
+                if unit == "log_return":
+                    change_txt = f"{val * 100:.2f}%"
+                else:
+                    change_txt = f"{val:.2f}bp"
+                show_rows.append(
+                    {
+                        "날짜": r["date"],
+                        "시장변수": r["display_name"],
+                        "일간변화": change_txt,
+                        "robust z-score": f"{float(r['robust_z']):.2f}",
+                        "절대하한": f"{float(r['abs_threshold']):.2f}",
+                        "단위": unit,
+                    }
+                )
+            st.dataframe(
+                pd.DataFrame(show_rows),
+                use_container_width=True,
+                hide_index=True,
             )
 
         with st.expander("데이터 품질"):
@@ -634,31 +672,6 @@ def main() -> None:
             if not meta_df.empty:
                 st.dataframe(
                     meta_df.style.format({"결측률": "{:.2%}"}, na_rep="—"),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-
-            abnormal = detect_abnormal_returns(transformed, raw_aligned)
-            st.markdown("**비정상 수익률/금리 변화 후보**")
-            st.caption(
-                f"|로그수익률|>{ABNORMAL_LOG_RETURN:.0%}, "
-                f"|VIX|>{ABNORMAL_VIX_LOG_RETURN:.0%}, "
-                f"|금리변화|>{ABNORMAL_YIELD_BP:.0f}bp 기준을 초과하는 일간 관측치를 표시합니다."
-            )
-            if abnormal.empty:
-                st.caption("기준을 초과하는 관측치가 없습니다.")
-            else:
-                abn_show = abnormal.rename(
-                    columns={
-                        "date": "날짜",
-                        "display_name": "시장변수",
-                        "value": "일간변화",
-                        "threshold": "임계점",
-                        "unit": "단위",
-                    }
-                )
-                st.dataframe(
-                    abn_show[["날짜", "시장변수", "일간변화", "임계점", "단위"]],
                     use_container_width=True,
                     hide_index=True,
                 )

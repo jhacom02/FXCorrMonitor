@@ -10,9 +10,28 @@ STATUS_ABS_DELTA = 0.10
 MIXED_SCORE_GAP = 0.05
 MIN_PERIOD_RATIO = 0.8
 
-ABNORMAL_LOG_RETURN = 0.10
-ABNORMAL_VIX_LOG_RETURN = 0.50
-ABNORMAL_YIELD_BP = 50.0
+# MAD → σ scale under normality: MAD ≈ 0.67449·σ ⇒ σ ≈ MAD/0.67449 ≈ 1.4826·MAD
+MAD_NORMAL_SCALE = 1.4826
+ROBUST_Z_WINDOW = 252
+ROBUST_Z_ABS_MIN = 4.0
+
+# Absolute move floors for historical shock days (log_return or bp by instrument).
+SHOCK_ABS_FLOOR: dict[str, float] = {
+    "DXY": 0.02,
+    "USDJPY": 0.02,
+    "USDCNH": 0.02,
+    "EURUSD": 0.02,
+    "KOSPI": 0.05,
+    "SPX": 0.05,
+    "NDX": 0.05,
+    "VIX": 0.30,
+    "WTI": 0.15,
+    "GOLD": 0.03,
+    "UST2Y": 25.0,
+    "UST10Y": 25.0,
+    "KTB3Y": 25.0,
+    "KTB10Y": 25.0,
+}
 
 CORR_GUIDE_SOFT = 0.30
 CORR_GUIDE_STRONG = 0.70

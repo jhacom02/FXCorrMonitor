@@ -92,7 +92,7 @@ FXCorrMonitor/
 | [`config/instruments.py`](config/instruments.py) | 종목 메타·정렬·변환 (색 hex 없음) |
 | [`config/thresholds.py`](config/thresholds.py) | 유의선·표시 필터·국면 상수 |
 | [`src/transformation.py`](src/transformation.py) | 변환·서울환시 정렬·as-of 컷오프 |
-| [`src/analytics.py`](src/analytics.py) | 롤링 상관·주도·국면·랭킹 상태 |
+| [`src/analytics.py`](src/analytics.py) | 롤링 상관·주도·국면·랭킹 상태·역사적 충격일 |
 | [`src/charts.py`](src/charts.py) | Plotly 차트 |
 | [`src/database.py`](src/database.py) / [`src/ingestion.py`](src/ingestion.py) | SQLite·Excel 적재 |
 | [`main.py`](main.py) | CLI (`init-db` / `ingest` / `run`) |
@@ -124,10 +124,12 @@ FXCorrMonitor/
 
 ### 화면 흐름
 
-메타 배너 → KPI → 롤링 상관계수 → 주도변수 랭킹 → 상관계수 히트맵 → 주도변수 타임라인 → 변수별 상세 분석 → 데이터 품질
+메타 배너 → KPI → 롤링 상관계수 → 주도변수 랭킹 → 상관계수 히트맵 → 주도변수 타임라인 → 변수별 상세 분석 → **역사적 충격일** → 데이터 품질
 
 - **메타 배너**: 분석 기준일, 분석 기간 라벨 `1Y (yyyy.mm.dd ~ yyyy.mm.dd)` (`format_lookback_period`)
-- **사이드바**: 분석 기간 키만 (`1M`…`10Y`, 날짜 없음), 전역 `|ρ|`(기본 0.30), 표시 변수, 엑셀 업로드
+- **사이드바**: 분석 기간 키만 (`1M`…`10Y`, 날짜 없음), 전역 `|ρ|`(기본 0.30), 표시 변수
+- **역사적 충격일**: 데이터 품질 expander 바깥 위. robust z + 자산별 절대 하한 (아래 절)
+- **데이터 품질**: expander 안 변수별 커버리지 표만
 
 상관관계는 인과관계를 의미하지 않습니다. 화면에도 동일 취지의 안내를 둡니다.
 
@@ -144,6 +146,10 @@ FXCorrMonitor/
 | `STATUS_ABS_DELTA` | 0.10 | 랭킹 강화/약화 `|ρ|` 차이 |
 | `MIN_PERIOD_RATIO` | 0.8 | 롤링 `min_periods = ceil(W×0.8)` |
 | `CORR_GUIDE_SOFT` / `STRONG` | 0.30 / 0.70 | 롤링 차트 수평 가이드 |
+| `MAD_NORMAL_SCALE` | 1.4826 | MAD→σ 정규분포 보정 (`MAD ≈ 0.67449·σ`) |
+| `ROBUST_Z_WINDOW` | 252 | 충격일 robust z 선행 유효 관측 수 (고정) |
+| `ROBUST_Z_ABS_MIN` | 4.0 | `|robust_z|` 충격 하한 |
+| `SHOCK_ABS_FLOOR` | 자산별 | 절대 변동 하한 (log_return 또는 bp) |
 
 ### 임계 적용 기준
 
@@ -244,12 +250,60 @@ FXCorrMonitor/
 - **지수화 비교**: `indexed_level_chart` (단일축). 분석 구간 내 두 시계열의 **첫 공통 유효일 = 100** (`rebase_base_date` / `rebase_series_to_100`)
 - 범례는 차트 안 inset; y축 상단 headroom으로 선과 겹침을 줄임. 지수화 차트는 원본과 plot 너비 정렬을 위해 투명 우측축을 둠
 
+## 역사적 충격일
+
+시기별 변동성 체제를 반영하기 위해 **고정 절대 임계만** 쓰지 않고, 직전 252거래일(유효 관측) 기준 robust z-score와 자산별 절대 하한을 **동시에** 적용합니다. 등급·분위수 라벨은 없습니다.
+
+### 분석기간 vs 계산기간
+
+- 화면 분석기간(`1M`…`10Y`)은 **표시 필터**만 담당합니다.
+- robust z는 `build_analysis_frame`의 **전체** `transformed_wide`에서 변수별 유효 관측으로 계산합니다.
+- lookback이 짧아도 median/MAD를 선택 구간 안에서 다시 산출하지 않습니다.
+
+### 일간 변화량
+
+기존 변환과 동일: 가격·지수·환율·원자재·VIX → `log_return`, 금리 → `diff_bp`. `SHOCK_ABS_FLOOR`에 없는 종목(USDKRW, F_NET 등)은 탐지 대상이 아닙니다.
+
+### Robust z (look-ahead 금지)
+
+시점 `t`의 변화량 `x_t`는 통계 창에서 제외합니다.
+
+```
+rolling_median_t = median(x[t-252 : t-1])   # 유효 관측 252개
+rolling_mad_t    = median(|x[t-252 : t-1] - rolling_median_t|)
+robust_sigma_t   = MAD_NORMAL_SCALE * rolling_mad_t   # 1.4826
+robust_z_t       = (x_t - rolling_median_t) / robust_sigma_t
+```
+
+`MAD_NORMAL_SCALE = 1.4826`은 정규분포에서 `MAD ≈ 0.67449·σ`이므로 `σ ≈ MAD/0.67449 ≈ 1.4826·MAD`가 되는 보정계수입니다. 금융 수익률은 두꺼운 꼬리를 가지므로 `|z|=4`가 정규분포 확률을 그대로 의미하지는 않으며, 시기별 변동성 대비 충격 강도 비교용 표준화 지표입니다. 선행 유효관측 &lt; 252이거나 `robust_sigma=0`이면 해당일 z는 NaN → 후보 제외.
+
+구현: [`src/analytics.py`](src/analytics.py) `detect_historical_shocks` (`shift(1)` + rolling 252).
+
+### 충격 조건
+
+`abs(robust_z) >= 4` **AND** `abs(x_t) >= SHOCK_ABS_FLOOR[instrument]`
+
+| 자산 | 절대 하한 |
+|------|-----------|
+| DXY, USDJPY, USDCNH, EURUSD | `\|log_return\| ≥ 0.02` |
+| KOSPI, SPX, NDX | `≥ 0.05` |
+| VIX | `≥ 0.30` |
+| WTI | `≥ 0.15` |
+| GOLD | `≥ 0.03` |
+| UST2Y, UST10Y, KTB3Y, KTB10Y | `\|bp\| ≥ 25` |
+
+### UI
+
+- 표: 날짜(최신순) / 시장변수 / 일간변화 / robust z-score / 절대임계값 / 단위
+- 일간변화: log_return은 퍼센트(`0.1135` → `11.35%`), 금리는 `bp`
+- z·절대임계값: 소수 둘째 자리
+
 ## 테스트
 
 | 파일 | 범위 |
 |------|------|
 | `tests/test_ingestion.py` | 날짜 변환, UPSERT, USDKRW 필수 |
 | `tests/test_transformation.py` | 로그수익·bp·level·ffill 금지·시차 정렬 |
-| `tests/test_analytics.py` | 롤링 상관·주도·국면 흡수·랭킹 국면 |
+| `tests/test_analytics.py` | 롤링 상관·주도·국면 흡수·랭킹 국면·역사적 충격일(robust z) |
 | `tests/test_charts_display.py` | Top-N 필터·히트맵·지수화 rebase |
 
