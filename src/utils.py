@@ -210,3 +210,13 @@ def lookback_range(
         offset = _LOOKBACK_OFFSETS[DEFAULT_LOOKBACK_PERIOD]
     start = (end - offset).normalize()
     return start, end
+
+
+def format_lookback_period(
+    period_key: str,
+    as_of: date | datetime | pd.Timestamp | str | None,
+) -> str:
+    if as_of is None or (isinstance(as_of, float) and pd.isna(as_of)) or as_of == "":
+        return period_key
+    start, end = lookback_range(as_of, period_key)
+    return f"{period_key} ({start.strftime('%Y-%m-%d')} ~ {end.strftime('%Y-%m-%d')})"

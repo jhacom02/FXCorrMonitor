@@ -126,7 +126,7 @@ def test_correlation_heatmap_builds_with_labels_and_desaturate():
                 }
             )
     multi = pd.DataFrame(rows)
-    fig = correlation_heatmap(multi, current_driver_id="KOSPI", user_min_abs=0.30)
+    fig = correlation_heatmap(multi, current_driver_id="KOSPI")
     assert len(fig.data) == 1
     hm = fig.data[0]
     assert list(hm.x) == ["20D", "60D", "120D"]
@@ -137,4 +137,19 @@ def test_correlation_heatmap_builds_with_labels_and_desaturate():
     dxy_idx = list(hm.y).index("DXY")
     assert abs(hm.z[kospi_idx][0] - 0.55) < 1e-9
     assert abs(hm.z[dxy_idx][0] - (-0.12 * 0.6)) < 1e-9
-    assert hm.text[dxy_idx][0] == "-0.12"
+
+
+def test_rebase_series_to_100_uses_analysis_start():
+    from src.charts import rebase_base_date, rebase_series_to_100
+
+    idx = pd.date_range("2024-01-01", periods=5, freq="B")
+    usd = pd.Series([1390.0, 1400.0, 1410.0, 1420.0, 1430.0], index=idx)
+    dxy = pd.Series([100.0, 101.0, 102.0, 103.0, 104.0], index=idx)
+    start = pd.Timestamp("2024-01-02")
+    base = rebase_base_date(usd, dxy, start=start)
+    assert base == pd.Timestamp("2024-01-02")
+    u = rebase_series_to_100(usd, start, base_date=base)
+    d = rebase_series_to_100(dxy, start, base_date=base)
+    assert abs(float(u.loc[start]) - 100.0) < 1e-9
+    assert abs(float(d.loc[start]) - 100.0) < 1e-9
+    assert abs(float(u.loc[pd.Timestamp("2024-01-03")]) - 100.0 * 1410 / 1400) < 1e-9

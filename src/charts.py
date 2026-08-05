@@ -9,7 +9,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from config.instruments import INSTRUMENT_BY_ID, SPECIAL_COLORS, color_for
-from config.thresholds import CORR_GUIDE_SOFT, CORR_GUIDE_STRONG, display_floor
+from config.thresholds import CORR_GUIDE_SOFT, CORR_GUIDE_STRONG, sig_abs
 from src.theme import load_css_vars
 
 _CSS = load_css_vars()
@@ -32,6 +32,19 @@ CHART_LAYOUT = dict(
         namelength=-1,
     ),
 )
+
+INSET_LEGEND = dict(
+    orientation="h",
+    yanchor="top",
+    y=0.98,
+    xanchor="right",
+    x=1,
+    font=dict(size=11),
+    bgcolor=_tok("fx-chart-hover-bg"),
+    borderwidth=0,
+)
+
+CHART_SUBTITLE = dict(font=dict(size=15), x=0.5, xanchor="center")
 
 DISPLAY_MODE_TOP3 = "top_3"
 DISPLAY_MODE_TOP5 = "top_5"
@@ -186,9 +199,10 @@ def build_rank_line(
     parts = []
     for i, row in enumerate(ranking.itertuples()):
         mark = circles[i] if i < len(circles) else f"{i + 1}."
-        abs_v = float(row.abs_correlation)
-        parts.append(f"{mark} {row.display_name} ({abs_v:.2f})")
-    return f"상관계수 순위: " + ",  ".join(parts)
+        rho = float(row.rolling_correlation)
+        sign = "+" if rho > 0 else ""
+        parts.append(f"{mark} {row.display_name} ({sign}{rho:.2f})")
+    return f"오늘자 주도변수: " + ",  ".join(parts)
 
 
 def rolling_correlation_chart(
@@ -305,7 +319,7 @@ def rolling_correlation_chart(
                 textfont=dict(color=dcolor, size=12),
                 marker=dict(size=9, color=dcolor, line=dict(width=1, color=_tok("fx-chart-font"))),
                 showlegend=False,
-                hovertemplate=f"{dname}: {val:.2f}<extra></extra>",
+                hoverinfo="skip",
             )
         )
 
@@ -340,22 +354,13 @@ def rolling_correlation_chart(
                 line_width=1,
             )
 
-    legend = dict(
-        orientation="h",
-        yanchor="top",
-        y=0.98,
-        xanchor="right",
-        x=1,
-        font=dict(size=11),
-        bgcolor=_tok("fx-chart-hover-bg"),
-        borderwidth=0,
-    )
     margin = dict(l=40, r=40, t=20, b=40)
 
     xaxis: dict[str, Any] = dict(
         title="",
         gridcolor=grid,
         tickformat="%Y-%m",
+        hoverformat="%Y-%m-%d",
         rangeslider=dict(visible=False),
     )
     if initial_zoom_years and initial_zoom_years > 0:
@@ -368,7 +373,7 @@ def rolling_correlation_chart(
     fig.update_layout(
         **CHART_LAYOUT,
         margin=margin,
-        legend=legend,
+        legend=INSET_LEGEND,
         title=None,
         height=height,
         yaxis=dict(range=[-1.05, 1.05], title="Rolling correlation", gridcolor=grid),
@@ -382,8 +387,6 @@ def correlation_heatmap(
     multi_corr: pd.DataFrame,
     height: int = 480,
     current_driver_id: str | None = None,
-    min_abs_by_window: dict[int, float] | None = None,
-    user_min_abs: float = 0.0,
     desaturate_factor: float = 0.6,
 ) -> go.Figure:
     if multi_corr is None or multi_corr.empty:
@@ -420,10 +423,10 @@ def correlation_heatmap(
         display_names.append(name)
         y_labels.append(name)
 
-    floors = min_abs_by_window or {
-        20: display_floor(20, user_min_abs),
-        60: display_floor(60, user_min_abs),
-        120: display_floor(120, user_min_abs),
+    floors = {
+        20: sig_abs(20),
+        60: sig_abs(60),
+        120: sig_abs(120),
     }
     col_floors = [
         float(floors.get(int(c.replace("D", "")), 0.0)) for c in cols
@@ -542,7 +545,7 @@ def driver_timeline_chart(
     x_range: tuple[Any, Any] | list[Any] | None = None,
 ) -> go.Figure:
     if regimes is None or regimes.empty:
-        return _empty_message_fig("주도 변수 구간이 없습니다.", height=height)
+        return _empty_message_fig("주도변수 구간이 없습니다.", height=height)
 
     df = regimes.copy()
     df["start_date"] = pd.to_datetime(df["start_date"])
@@ -551,13 +554,17 @@ def driver_timeline_chart(
     df["low_confidence"] = df["average_abs_correlation"].fillna(0) < low_confidence_threshold
 
     fig = go.Figure()
+    none_fill = _hex_to_rgba(SPECIAL_COLORS.get("NONE", _tok("fx-color-NONE")), 0.85)
+    mixed_fill = _hex_to_rgba(SPECIAL_COLORS.get("MIXED", _tok("fx-color-MIXED")), 0.85)
     for _, row in df.sort_values("start_date").iterrows():
         did = str(row["driver_id"])
-        base = SPECIAL_COLORS.get(did, color_for(did))
-        low = bool(row["low_confidence"]) or did in ("NONE", "MIXED")
-        fill = _hex_to_rgba(base, 0.35 if low and did not in SPECIAL_COLORS else (0.45 if low else 0.85))
-        if did in SPECIAL_COLORS:
-            fill = _hex_to_rgba(base, 0.40 if low else 0.75)
+        low = bool(row["low_confidence"]) or did == "NONE"
+        if did == "MIXED":
+            fill = mixed_fill
+        elif low:
+            fill = none_fill
+        else:
+            fill = _hex_to_rgba(color_for(did), 0.85)
 
         if did == "NONE":
             driver_txt = "—"
@@ -584,7 +591,7 @@ def driver_timeline_chart(
         fig.add_trace(
             go.Bar(
                 x=[(row["end_plot"] - row["start_date"]).total_seconds() * 1000],
-                y=["주도 변수"],
+                y=["_"],
                 base=[row["start_date"]],
                 orientation="h",
                 marker=dict(color=fill, line=dict(width=0)),
@@ -606,15 +613,15 @@ def driver_timeline_chart(
 
     layout_kw: dict[str, Any] = dict(
         **CHART_LAYOUT,
-        margin=dict(l=40, r=20, t=28 if title else 12, b=36),
+        margin=dict(l=16, r=20, t=28 if title else 12, b=36),
         height=height,
         barmode="overlay",
         xaxis=xaxis,
-        yaxis=dict(title=""),
+        yaxis=dict(title="", showticklabels=False, ticks=""),
         bargap=0.2,
     )
     if title:
-        layout_kw["title"] = dict(text=title, font=dict(size=13), x=0, xanchor="left")
+        layout_kw["title"] = {**CHART_SUBTITLE, "text": title}
     fig.update_layout(**layout_kw)
     return fig
 
@@ -654,20 +661,53 @@ def series_line_chart(
         title=title,
         height=height,
         yaxis=dict(title=y_title, gridcolor=grid),
-        xaxis=dict(title="", gridcolor=grid, tickformat="%Y-%m"),
+        xaxis=dict(title="", gridcolor=grid, tickformat="%Y-%m", hoverformat="%Y-%m-%d"),
         showlegend=False,
         hovermode="x unified",
     )
     return fig
 
 
+DETAIL_LEVEL_MARGIN = dict(l=56, r=64, t=28, b=40)
+
+
+def _y_range_with_legend_headroom(
+    *series: pd.Series,
+    top_frac: float = 0.16,
+    bottom_frac: float = 0.04,
+) -> list[float] | None:
+    chunks: list[np.ndarray] = []
+    for s in series:
+        if s is None or s.empty:
+            continue
+        v = np.asarray(s.dropna().values, dtype=float)
+        if v.size:
+            chunks.append(v)
+    if not chunks:
+        return None
+    vals = np.concatenate(chunks)
+    vals = vals[np.isfinite(vals)]
+    if vals.size == 0:
+        return None
+    ymin = float(np.min(vals))
+    ymax = float(np.max(vals))
+    if ymin == ymax:
+        pad = abs(ymin) * 0.05 if ymin != 0 else 1.0
+        ymin, ymax = ymin - pad, ymax + pad
+    span = ymax - ymin
+    usable = max(1e-9, 1.0 - top_frac - bottom_frac)
+    display_span = span / usable
+    return [ymin - display_span * bottom_frac, ymax + display_span * top_frac]
+
+
 def dual_raw_level_chart(
     usdkrw: pd.Series,
     driver: pd.Series,
     driver_name: str,
-    height: int = 360,
+    height: int = 380,
     usd_color: str | None = None,
     driver_color: str | None = None,
+    title: str | None = None,
 ) -> go.Figure:
     from plotly.subplots import make_subplots
 
@@ -708,14 +748,162 @@ def dual_raw_level_chart(
             ),
             secondary_y=True,
         )
-    fig.update_layout(
+    margin = {**DETAIL_LEVEL_MARGIN, "t": 28 if title else 20}
+    layout_kw: dict[str, Any] = dict(
         **CHART_LAYOUT,
-        margin=dict(l=48, r=48, t=24, b=36),
+        margin=margin,
         height=height,
         hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        xaxis=dict(title="", gridcolor=grid, tickformat="%Y-%m"),
+        legend=INSET_LEGEND,
+        xaxis=dict(title="", gridcolor=grid, tickformat="%Y-%m", hoverformat="%Y-%m-%d"),
     )
-    fig.update_yaxes(title_text="USDKRW", secondary_y=False, gridcolor=grid)
-    fig.update_yaxes(title_text=driver_name, secondary_y=True, gridcolor=grid, showgrid=False)
+    if title:
+        layout_kw["title"] = {**CHART_SUBTITLE, "text": title}
+    fig.update_layout(**layout_kw)
+    left_range = _y_range_with_legend_headroom(u)
+    right_range = _y_range_with_legend_headroom(d)
+    fig.update_yaxes(
+        title_text="USDKRW",
+        secondary_y=False,
+        gridcolor=grid,
+        range=left_range,
+        automargin=False,
+    )
+    fig.update_yaxes(
+        title_text=driver_name,
+        secondary_y=True,
+        gridcolor=grid,
+        showgrid=False,
+        range=right_range,
+        automargin=False,
+    )
     return fig
+
+
+def indexed_level_chart(
+    usdkrw: pd.Series,
+    driver: pd.Series,
+    driver_name: str,
+    height: int = 380,
+    usd_color: str | None = None,
+    driver_color: str | None = None,
+    title: str | None = None,
+) -> go.Figure:
+    from plotly.subplots import make_subplots
+
+    u = usdkrw.dropna().sort_index() if usdkrw is not None else pd.Series(dtype=float)
+    d = driver.dropna().sort_index() if driver is not None else pd.Series(dtype=float)
+    if u.empty and d.empty:
+        return _empty_message_fig("표시할 지수화 값이 없습니다.", height=height)
+
+    left_color = usd_color or _tok("fx-detail-line")
+    right_color = driver_color or _tok("fx-detail-driver-line")
+    grid = _tok("fx-chart-grid")
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    if not u.empty:
+        u_hover = ["—" if pd.isna(v) else f"{float(v):,.2f}" for v in u.values]
+        fig.add_trace(
+            go.Scatter(
+                x=u.index,
+                y=u.values,
+                mode="lines",
+                name="USDKRW",
+                line=dict(color=left_color, width=1.6),
+                customdata=u_hover,
+                hovertemplate="USDKRW: %{customdata}<extra></extra>",
+            ),
+            secondary_y=False,
+        )
+    if not d.empty:
+        d_hover = ["—" if pd.isna(v) else f"{float(v):,.2f}" for v in d.values]
+        fig.add_trace(
+            go.Scatter(
+                x=d.index,
+                y=d.values,
+                mode="lines",
+                name=driver_name,
+                line=dict(color=right_color, width=1.6),
+                customdata=d_hover,
+                hovertemplate=f"{driver_name}: %{{customdata}}<extra></extra>",
+            ),
+            secondary_y=False,
+        )
+    margin = {**DETAIL_LEVEL_MARGIN, "t": 28 if title else 20}
+    layout_kw: dict[str, Any] = dict(
+        **CHART_LAYOUT,
+        margin=margin,
+        height=height,
+        hovermode="x unified",
+        legend=INSET_LEGEND,
+        xaxis=dict(title="", gridcolor=grid, tickformat="%Y-%m", hoverformat="%Y-%m-%d"),
+    )
+    if title:
+        layout_kw["title"] = {**CHART_SUBTITLE, "text": title}
+    fig.update_layout(**layout_kw)
+    y_range = _y_range_with_legend_headroom(u, d)
+    fig.update_yaxes(
+        title_text="지수",
+        secondary_y=False,
+        gridcolor=grid,
+        range=y_range,
+        automargin=False,
+    )
+    fig.update_yaxes(
+        title_text=driver_name,
+        secondary_y=True,
+        showgrid=False,
+        showticklabels=True,
+        ticks="",
+        range=y_range,
+        automargin=False,
+        title_font=dict(color="rgba(0,0,0,0)"),
+        tickfont=dict(color="rgba(0,0,0,0)"),
+    )
+    return fig
+
+
+def rebase_base_date(*series: pd.Series, start: pd.Timestamp) -> pd.Timestamp | None:
+    """First Seoul calendar date on/after start present in every non-empty series."""
+    start_ts = pd.Timestamp(start).normalize()
+    common: pd.DatetimeIndex | None = None
+    for s in series:
+        if s is None or s.empty:
+            continue
+        idx = pd.DatetimeIndex(pd.to_datetime(s.dropna().index)).normalize().unique().sort_values()
+        idx = idx[idx >= start_ts]
+        if len(idx) == 0:
+            return None
+        common = idx if common is None else common.intersection(idx)
+        if common is None or len(common) == 0:
+            return None
+    if common is None or len(common) == 0:
+        return None
+    return pd.Timestamp(common.min())
+
+
+def rebase_series_to_100(
+    series: pd.Series,
+    start: pd.Timestamp,
+    base_date: pd.Timestamp | None = None,
+) -> pd.Series:
+    """Rebase levels so the value on analysis start (or base_date) equals 100."""
+    if series is None or series.empty:
+        return pd.Series(dtype=float)
+    s = series.dropna().sort_index()
+    if s.empty:
+        return pd.Series(dtype=float)
+    s.index = pd.DatetimeIndex(pd.to_datetime(s.index)).normalize()
+    start_ts = pd.Timestamp(start).normalize()
+    if base_date is not None:
+        base_ts = pd.Timestamp(base_date).normalize()
+        if base_ts not in s.index:
+            return pd.Series(dtype=float)
+        base = float(s.loc[base_ts])
+    else:
+        window = s[s.index >= start_ts]
+        if window.empty:
+            return pd.Series(dtype=float)
+        base = float(window.iloc[0])
+    if not np.isfinite(base) or base == 0.0:
+        return pd.Series(dtype=float)
+    return 100.0 * s / base

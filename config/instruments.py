@@ -1,4 +1,4 @@
-"""Instrument metadata for FXCorrMonitor. Series colors come from styles.css."""
+"""Instrument metadata for FXCorrMonitor. Series colors come from styles.css only."""
 
 from __future__ import annotations
 
@@ -34,7 +34,6 @@ class Instrument:
     transformation: str
     alignment: str
     active: bool = True
-    color: str = ""
 
 
 NONE_COLOR = _tok("fx-color-NONE")
@@ -54,7 +53,6 @@ INSTRUMENTS: list[Instrument] = [
         data_type="price",
         transformation="log_return",
         alignment="same_day",
-        color="#E6EDF3",
     ),
     Instrument(
         instrument_id="DXY",
@@ -65,7 +63,6 @@ INSTRUMENTS: list[Instrument] = [
         data_type="price",
         transformation="log_return",
         alignment="same_day",
-        color="#F85149",
     ),
     Instrument(
         instrument_id="USDJPY",
@@ -76,7 +73,6 @@ INSTRUMENTS: list[Instrument] = [
         data_type="price",
         transformation="log_return",
         alignment="same_day",
-        color="#FF7B72",
     ),
     Instrument(
         instrument_id="USDCNH",
@@ -87,7 +83,6 @@ INSTRUMENTS: list[Instrument] = [
         data_type="price",
         transformation="log_return",
         alignment="same_day",
-        color="#F0883E",
     ),
     Instrument(
         instrument_id="EURUSD",
@@ -98,7 +93,6 @@ INSTRUMENTS: list[Instrument] = [
         data_type="price",
         transformation="log_return",
         alignment="same_day",
-        color="#DB61A2",
     ),
     Instrument(
         instrument_id="KOSPI",
@@ -109,7 +103,6 @@ INSTRUMENTS: list[Instrument] = [
         data_type="price",
         transformation="log_return",
         alignment="same_day",
-        color="#3FB950",
     ),
     Instrument(
         instrument_id="F_NET",
@@ -120,7 +113,6 @@ INSTRUMENTS: list[Instrument] = [
         data_type="flow",
         transformation="level",
         alignment="same_day",
-        color="#F0C14A",
     ),
     Instrument(
         instrument_id="SPX",
@@ -131,7 +123,6 @@ INSTRUMENTS: list[Instrument] = [
         data_type="price",
         transformation="log_return",
         alignment="previous_us_close",
-        color="#58A6FF",
     ),
     Instrument(
         instrument_id="NDX",
@@ -142,7 +133,6 @@ INSTRUMENTS: list[Instrument] = [
         data_type="price",
         transformation="log_return",
         alignment="previous_us_close",
-        color="#79C0FF",
     ),
     Instrument(
         instrument_id="VIX",
@@ -153,7 +143,6 @@ INSTRUMENTS: list[Instrument] = [
         data_type="price",
         transformation="log_return",
         alignment="previous_us_close",
-        color="#A371F7",
     ),
     Instrument(
         instrument_id="WTI",
@@ -164,7 +153,6 @@ INSTRUMENTS: list[Instrument] = [
         data_type="price",
         transformation="log_return",
         alignment="previous_us_close",
-        color="#D29922",
     ),
     Instrument(
         instrument_id="GOLD",
@@ -175,7 +163,6 @@ INSTRUMENTS: list[Instrument] = [
         data_type="price",
         transformation="log_return",
         alignment="previous_us_close",
-        color="#E3B341",
     ),
     Instrument(
         instrument_id="UST2Y",
@@ -186,7 +173,6 @@ INSTRUMENTS: list[Instrument] = [
         data_type="yield",
         transformation="diff_bp",
         alignment="previous_us_close",
-        color="#39C5CF",
     ),
     Instrument(
         instrument_id="UST10Y",
@@ -197,7 +183,6 @@ INSTRUMENTS: list[Instrument] = [
         data_type="yield",
         transformation="diff_bp",
         alignment="previous_us_close",
-        color="#76E3EA",
     ),
     Instrument(
         instrument_id="KTB3Y",
@@ -208,7 +193,6 @@ INSTRUMENTS: list[Instrument] = [
         data_type="yield",
         transformation="diff_bp",
         alignment="same_day",
-        color="#C084FC",
     ),
     Instrument(
         instrument_id="KTB10Y",
@@ -219,14 +203,13 @@ INSTRUMENTS: list[Instrument] = [
         data_type="yield",
         transformation="diff_bp",
         alignment="same_day",
-        color="#E879F9",
     ),
 ]
 
 INSTRUMENT_BY_ID: dict[str, Instrument] = {i.instrument_id: i for i in INSTRUMENTS}
 
 INSTRUMENT_COLORS: dict[str, str] = {
-    i.instrument_id: i.color for i in INSTRUMENTS
+    i.instrument_id: css_instrument_color(i.instrument_id) for i in INSTRUMENTS
 }
 
 DEFAULT_DRIVER_IDS: list[str] = [
@@ -263,11 +246,12 @@ def get_driver_instruments(include_inactive: bool = False) -> list[Instrument]:
 def instrument_to_row(instrument: Instrument, updated_at: str) -> dict[str, Any]:
     row = asdict(instrument)
     row["source_sheet"] = row.pop("sheet_name")
-    row.pop("color", None)
     row["active"] = 1 if instrument.active else 0
     row["updated_at"] = updated_at
     return row
 
 
 def color_for(instrument_id: str) -> str:
-    return INSTRUMENT_COLORS.get(instrument_id) or css_instrument_color(instrument_id)
+    if instrument_id in SPECIAL_COLORS:
+        return SPECIAL_COLORS[instrument_id]
+    return css_instrument_color(instrument_id)

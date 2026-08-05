@@ -38,24 +38,24 @@
   --fx-detail-driver-line: #79C0FF;
   --fx-inst-fallback: #7F8C9B;
   --fx-timeline-invalid: #6E7681;
-  --fx-color-NONE: #D0D7DE;
-  --fx-color-MIXED: #6E7681;
+  --fx-color-NONE: #6E7681;
+  --fx-color-MIXED: #9c8966;
   --fx-color-USDKRW: #E6EDF3;
-  --fx-color-DXY: #F85149;
-  --fx-color-USDJPY: #FF7B72;
-  --fx-color-USDCNH: #DB6D28;
-  --fx-color-EURUSD: #BF8700;
-  --fx-color-KOSPI: #3FB950;
-  --fx-color-F_NET: #2DD4BF;
-  --fx-color-SPX: #58A6FF;
-  --fx-color-NDX: #1F6FEB;
-  --fx-color-VIX: #A371F7;
-  --fx-color-WTI: #D29922;
-  --fx-color-GOLD: #E3B341;
-  --fx-color-UST2Y: #39C5CF;
-  --fx-color-UST10Y: #00A6A6;
-  --fx-color-KTB3Y: #C084FC;
-  --fx-color-KTB10Y: #A855F7;
+  --fx-color-DXY: #1f6b2e;
+  --fx-color-USDJPY: #3fb84f;
+  --fx-color-USDCNH: #59bd64;
+  --fx-color-EURUSD: #8ad190;
+  --fx-color-KOSPI: #58A6FF;
+  --fx-color-F_NET: #54ace6;
+  --fx-color-SPX: #0D419D;
+  --fx-color-NDX: #3167c4;
+  --fx-color-VIX: #f752c6;
+  --fx-color-WTI: #8b6513;
+  --fx-color-GOLD: #F2CC60;
+  --fx-color-UST2Y: #fc9c58;
+  --fx-color-UST10Y: #e98640;
+  --fx-color-KTB3Y: #d69af8;
+  --fx-color-KTB10Y: #e070f7;
 }
 
 [data-testid="stSidebar"] {
@@ -141,7 +141,7 @@ div[data-testid="stDecoration"] {
   background: var(--fx-tag-bg);
   border: 1px solid var(--fx-tag-border);
   border-radius: var(--fx-radius);
-  padding: 0.75rem 0.9rem;
+  padding: 0.55rem 0.85rem;
   margin-bottom: 0.45rem;
   min-height: 72px;
 }

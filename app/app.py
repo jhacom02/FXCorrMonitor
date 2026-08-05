@@ -50,6 +50,7 @@ from src.utils import (
     db_mtime_key,
     format_corr,
     format_fx,
+    format_lookback_period,
     lookback_range,
     setup_logging,
 )
@@ -61,6 +62,9 @@ from src.charts import (
     correlation_heatmap,
     driver_timeline_chart,
     dual_raw_level_chart,
+    indexed_level_chart,
+    rebase_base_date,
+    rebase_series_to_100,
     rolling_correlation_chart,
 )
 
@@ -103,7 +107,7 @@ def _safe_message(exc: Exception) -> str:
 
 def render_empty_state() -> None:
     st.title("USDKRW Driver Monitor")
-    st.caption("USDKRW와 주요 시장변수 간 롤링 상관관계 및 시기별 주도 변수 변화를 모니터링합니다.")
+    st.caption("USDKRW와 주요 시장변수 간 롤링 상관관계 및 시기별 주도변수 변화를 모니터링합니다.")
     st.info(
         "SQLite에 적재된 데이터가 없습니다.\n\n"
         "1. 인포맥스에서 Excel을 추출합니다.\n"
@@ -146,7 +150,7 @@ def sidebar_controls(status: dict) -> dict:
     ]
     all_names = list(all_options.keys())
 
-    with st.sidebar.expander("변수 설정", expanded=False):
+    with st.sidebar.expander("변수 선택", expanded=False):
         if "var_multiselect" not in st.session_state:
             st.session_state["var_multiselect"] = [n for n in default_names if n in all_names]
         else:
@@ -222,6 +226,7 @@ def kpi_card(label: str, value: str) -> None:
 
 
 def render_meta_banner(as_of_str: str, period_key: str) -> None:
+    period_label = format_lookback_period(period_key, as_of_str)
     st.markdown(
         f"""
         <div class="fx-meta-banner">
@@ -232,7 +237,7 @@ def render_meta_banner(as_of_str: str, period_key: str) -> None:
             </div>
             <div class="fx-meta-item">
               <div class="fx-meta-label">분석 기간</div>
-              <div class="fx-meta-value">{period_key}</div>
+              <div class="fx-meta-value">{period_label}</div>
             </div>
           </div>
         </div>
@@ -284,7 +289,7 @@ def main() -> None:
         return
 
     st.title("USDKRW Driver Monitor")
-    st.caption("USDKRW와 주요 시장변수 간 롤링 상관관계 및 시기별 주도 변수 변화를 모니터링합니다.")
+    st.caption("USDKRW와 주요 시장변수 간 롤링 상관관계 및 시기별 주도변수 변화를 모니터링합니다.")
 
     if not controls["selected_ids"]:
         st.warning("표시할 변수를 하나 이상 선택하세요.")
@@ -308,9 +313,9 @@ def main() -> None:
         start, end = lookback_range(as_of, controls["period_key"])
 
         transformed = frame["transformed_wide"]
-        raw_aligned = frame["raw_aligned_wide"]
+        raw_full = frame["raw_aligned_wide"]
         transformed = transformed.loc[(transformed.index >= start) & (transformed.index <= end)]
-        raw_aligned = raw_aligned.loc[(raw_aligned.index >= start) & (raw_aligned.index <= end)]
+        raw_aligned = raw_full.loc[(raw_full.index >= start) & (raw_full.index <= end)]
 
         selected_drivers = [i for i in controls["selected_ids"] if i in transformed.columns]
         if not selected_drivers:
@@ -358,31 +363,36 @@ def main() -> None:
         c1, c2, c3, c4 = st.columns(4)
         with c1:
             driver_kpi = "—" if driver_id == DRIVER_NONE else snap["driver_name"]
-            kpi_card("주도 변수", driver_kpi)
+            kpi_card("오늘자 주도변수", driver_kpi)
         with c2:
             kpi_card("롤링 상관계수", rho_txt)
         with c3:
             kpi_card("USDKRW", format_fx(latest_fx))
         with c4:
-            kpi_card("변화량", chg_txt)
+            kpi_card("USDKRW (Chg)", chg_txt)
 
         with st.expander("분석 기준 보기", expanded=False):
             st.markdown(
                 """
-- 전일 확정 종가만 사용하며, 실시간 현재가는 포함하지 않습니다.
-- Pearson 롤링 상관계수(20D/60D/120D, min_periods≈80%)를 계산합니다.
-- 높은 상관은 동행을 의미하며, 인과관계를 의미하지 않습니다.
-
-- 전역 상관계수 임계값: 기본값 0.30. 사이드바에서 설정 가능.
-- 윈도우 상관계수 임계값: |20D ρ| ≥ 0.44 / |60D ρ| ≥ 0.25 / |120D ρ| ≥ 0.18.
-
-- [KPI 카드]: |20D ρ| 기준 1위. 윈도우 임계값 이상일 때만 표시.
-- [롤링 상관계수]: 강조는 |ρ| 기준 1위. 차트에 max(전역 임계값, 윈도우 임계값) 이상인 시장변수만 표시.
-- [주도 변수 랭킹]: 시장변수 전체 표시. |20D ρ| 내림차순 정렬.
-- [상관계수 히트맵]: 시장변수 전체 표시. |20D ρ| 내림차순 정렬. max(전역 임계값, 윈도우 임계값) 미만이면 채도 낮춤.
-- [시기별 타임라인]: 일별 주도/혼합 국면 표시. 국면 평균 |ρ|가 윈도우 임계값 미만이면 흐리게 표시.
-- [변수별 상세 분석]: USDKRW와 선택 시장변수의 원본값을 이중축으로 표시.
-                """
+<div class="fx-detail-panel">
+<ul>
+<li>전일 확정 종가만 사용하며, 실시간 현재가는 포함하지 않습니다.</li>
+<li>Pearson 롤링 상관계수(20D/60D/120D, min_periods≈80%)를 계산합니다.</li>
+<li>높은 상관은 동행을 의미하며, 인과관계를 의미하지 않습니다.</li>
+<hr>
+<li>전역 상관계수 임계값: 기본값 0.30. 사이드바에서 설정 가능.</li>
+<li>윈도우 상관계수 임계값: |20D ρ| ≥ 0.44 / |60D ρ| ≥ 0.25 / |120D ρ| ≥ 0.18.</li>
+<hr>
+<li>[KPI 카드] |20D ρ| 기준 1위 변수만 표시. 윈도우 임계값 이상일 때만 표시.</li>
+<li>[롤링 상관계수] 차트에 max(전역 임계값, 윈도우 임계값) 이상인 변수만 표시.</li>
+<li>[주도변수 랭킹] 변수 전체 표시. |20D ρ| 내림차순 정렬. 신규/전환/강화/약화/지속 국면 표시.</li>
+<li>[상관계수 히트맵] 변수 전체 표시. |20D ρ| 내림차순 정렬. 윈도우 임계값 미만이면 흐림.</li>
+<li>[주도변수 타임라인] 시기별 주도/혼합 국면 표시. 주도 없음은 회색, 혼합은 앰버로 표시.</li>
+<li>[변수별 상세 분석] 원본값 비교(이중축)·지수화 비교(분석 시작일=100, 단일축).</li>
+</ul>
+</div>
+                """,
+                unsafe_allow_html=True,
             )
 
         # --- Rolling chart ---
@@ -458,7 +468,7 @@ def main() -> None:
             st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, theme=None)
 
         # --- Ranking ---
-        st.markdown('<div class="fx-section-title">주도 변수 랭킹</div>', unsafe_allow_html=True)
+        st.markdown('<div class="fx-section-title">주도변수 랭킹</div>', unsafe_allow_html=True)
         st.caption("최근 20D/60D/120D 상관계수를 표시하며, 국면 열에 신규/전환/강화/약화/지속을 표시합니다.")
         rank_rows: list[dict] = []
         for iid in display_ids:
@@ -483,7 +493,7 @@ def main() -> None:
             st.info("표시할 랭킹 변수가 없습니다.")
         else:
             rank_df = pd.DataFrame(rank_rows).sort_values("_abs20", ascending=False).reset_index(drop=True)
-            rank_df.insert(0, "순위", range(1, len(rank_df) + 1))
+            rank_df.insert(0, "순위", [str(i) for i in range(1, len(rank_df) + 1)])
             driver_rows = set(
                 rank_df.index[rank_df["instrument_id"] == driver_id].tolist()
             ) if driver_id else set()
@@ -510,7 +520,6 @@ def main() -> None:
                 correlation_heatmap(
                     multi,
                     current_driver_id=driver_id if driver_id not in (DRIVER_NONE, DRIVER_MIXED) else None,
-                    user_min_abs=controls["min_abs"],
                 ),
                 use_container_width=True,
                 config=PLOTLY_CONFIG,
@@ -518,8 +527,8 @@ def main() -> None:
             )
 
         # --- Timeline ---
-        st.markdown('<div class="fx-section-title">시기별 타임라인</div>', unsafe_allow_html=True)
-        st.caption("20D/60D/120D 시기별 주도 변수를 표시합니다. 국면 평균 |ρ|가 윈도우 임계값 이상일 때만 표시합니다.")
+        st.markdown('<div class="fx-section-title">주도변수 타임라인</div>', unsafe_allow_html=True)
+        st.caption("주도변수가 없거나 평균 |ρ|가 유의 미만이면 회색, 주도변수 2개 이상의 혼합 국면이면 앰버로 표시합니다.")
         x_range = [start, end + pd.Timedelta(days=1)]
         for w, label in zip(ANALYSIS_WINDOWS, ("20D", "60D", "120D")):
             regimes_w = regimes_for_window(transformed, selected_drivers, w)
@@ -537,7 +546,7 @@ def main() -> None:
 
         # --- Detail ---
         st.markdown('<div class="fx-section-title">변수별 상세 분석</div>', unsafe_allow_html=True)
-        st.caption("USDKRW와 선택한 변수의 원본값을 비교 표시합니다.")
+        st.caption("USDKRW와 선택한 변수의 원본값 및 지수화 비교를 표시합니다.")
         detail_drivers = [d for d in get_driver_instruments() if d.instrument_id in raw_aligned.columns]
         if not detail_drivers:
             st.info("표시할 시장변수가 없습니다.")
@@ -553,6 +562,30 @@ def main() -> None:
                     usd_s,
                     drv_s,
                     inst.display_name,
+                    title="원본값 비교",
+                ),
+                use_container_width=True,
+                config=PLOTLY_CONFIG,
+                theme=None,
+            )
+
+            usd_full = raw_full[TARGET_ID] if TARGET_ID in raw_full.columns else pd.Series(dtype=float)
+            drv_full = raw_full[pick] if pick in raw_full.columns else pd.Series(dtype=float)
+            base_day = rebase_base_date(usd_full, drv_full, start=start)
+            usd_idx = rebase_series_to_100(usd_full, start, base_date=base_day)
+            drv_idx = rebase_series_to_100(drv_full, start, base_date=base_day)
+            usd_idx = usd_idx.loc[(usd_idx.index >= start) & (usd_idx.index <= end)]
+            drv_idx = drv_idx.loc[(drv_idx.index >= start) & (drv_idx.index <= end)]
+            if base_day is not None:
+                idx_title = f"지수화 비교 ({pd.Timestamp(base_day).date()} = 100)"
+            else:
+                idx_title = "지수화 비교 (분석 시작일 = 100)"
+            st.plotly_chart(
+                indexed_level_chart(
+                    usd_idx,
+                    drv_idx,
+                    inst.display_name,
+                    title=idx_title,
                 ),
                 use_container_width=True,
                 config=PLOTLY_CONFIG,
@@ -598,6 +631,7 @@ def main() -> None:
 <li>최대 ρ: {max_rho} ({max_date})</li>
 </ul>
 </div>
+<br>
                 """,
                 unsafe_allow_html=True,
             )
