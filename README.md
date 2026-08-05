@@ -1,6 +1,6 @@
 # FXCorrMonitor
 
-USDKRW와 주요 금융시장 변수의 **롤링 상관계수** 및 **주도 변수** 변화를 모니터링하는 정적 대시보드입니다.
+USDKRW와 주요 시장변수 간 롤링 상관관계 및 시기별 주도변수 변화를 모니터링합니다.
 
 인포맥스에서 수동 추출한 Excel을 SQLite에 적재하고, Streamlit이 SQLite만 조회합니다. LLM·외부 AI API·실시간 시세 API는 사용하지 않습니다.
 
