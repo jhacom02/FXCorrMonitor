@@ -842,7 +842,7 @@ def indexed_level_chart(
     fig.update_layout(**layout_kw)
     y_range = _y_range_with_legend_headroom(u, d)
     fig.update_yaxes(
-        title_text="지수",
+        title_text="Index",
         secondary_y=False,
         gridcolor=grid,
         range=y_range,
