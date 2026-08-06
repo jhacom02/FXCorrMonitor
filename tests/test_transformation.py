@@ -69,6 +69,20 @@ def test_as_of_cutoff_excludes_future():
     assert len(clipped) == 2
 
 
+def test_as_of_cutoff_snaps_non_trading_day():
+    idx = pd.to_datetime(["2024-01-02", "2024-01-03", "2024-01-04"])
+    wide = pd.DataFrame(
+        {
+            TARGET_ID: [1300.0, 1301.0, 1302.0],
+            "DXY": [100.0, 101.0, 102.0],
+        },
+        index=idx,
+    )
+    clipped, as_of = apply_as_of_cutoff(wide, as_of_date=pd.Timestamp("2024-01-06"))
+    assert as_of == pd.Timestamp("2024-01-04")
+    assert clipped.index.max() == pd.Timestamp("2024-01-04")
+
+
 def test_as_of_cutoff_defaults_to_prior_session():
     """Same-day Infomax open/intraday must not become analysis_as_of."""
     from datetime import date as date_cls

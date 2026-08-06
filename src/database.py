@@ -277,6 +277,7 @@ def get_db_status(db_path: str | Path | None = None) -> dict[str, Any]:
         "db_exists": path.exists(),
         "market_data_exists": False,
         "latest_date": None,
+        "usdkrw_earliest_date": None,
         "usdkrw_latest_date": None,
         "usdkrw_latest_value": None,
         "row_count": 0,
@@ -294,16 +295,25 @@ def get_db_status(db_path: str | Path | None = None) -> dict[str, Any]:
         latest = conn.execute("SELECT MAX(date) AS d FROM market_data").fetchone()["d"]
         usd = conn.execute(
             """
-            SELECT date, raw_value FROM market_data
+            SELECT
+                MIN(date) AS earliest_date,
+                MAX(date) AS latest_date,
+                (
+                    SELECT raw_value FROM market_data
+                    WHERE instrument_id='USDKRW'
+                    ORDER BY date DESC
+                    LIMIT 1
+                ) AS latest_value
+            FROM market_data
             WHERE instrument_id='USDKRW'
-            ORDER BY date DESC
-            LIMIT 1
             """
         ).fetchone()
     status["row_count"] = int(row_count)
     status["latest_date"] = latest
-    if usd:
-        status["usdkrw_latest_date"] = usd["date"]
-        status["usdkrw_latest_value"] = float(usd["raw_value"])
+    if usd and usd["latest_date"] is not None:
+        status["usdkrw_earliest_date"] = usd["earliest_date"]
+        status["usdkrw_latest_date"] = usd["latest_date"]
+        if usd["latest_value"] is not None:
+            status["usdkrw_latest_value"] = float(usd["latest_value"])
     status["last_ingestion"] = get_latest_ingestion(path)
     return status

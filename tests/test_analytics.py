@@ -256,6 +256,28 @@ def test_lookback_range_1m():
     assert start == pd.Timestamp("2024-02-29")
 
 
+def test_snap_to_prior_session_weekend():
+    from src.utils import snap_to_prior_session
+
+    sessions = pd.DatetimeIndex(["2024-06-03", "2024-06-04", "2024-06-05", "2024-06-07"])
+    # Saturday → prior Friday
+    assert snap_to_prior_session("2024-06-08", sessions) == pd.Timestamp("2024-06-07")
+    assert snap_to_prior_session("2024-06-05", sessions) == pd.Timestamp("2024-06-05")
+    with pytest.raises(ValueError):
+        snap_to_prior_session("2024-06-01", sessions)
+
+
+def test_lookback_from_snapped_as_of():
+    from src.utils import lookback_range, snap_to_prior_session
+
+    sessions = pd.DatetimeIndex(pd.bdate_range("2023-01-01", "2024-06-15"))
+    as_of = snap_to_prior_session("2024-06-15", sessions)  # Saturday
+    assert as_of == pd.Timestamp("2024-06-14")
+    start, end = lookback_range(as_of, "1Y")
+    assert end == as_of
+    assert start == pd.Timestamp("2023-06-14")
+
+
 def test_regimes_for_window_smoke():
     from src.analytics import regimes_for_window
 

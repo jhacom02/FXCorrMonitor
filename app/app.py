@@ -50,6 +50,7 @@ from src.utils import (
     format_lookback_period,
     lookback_range,
     setup_logging,
+    snap_to_prior_session,
 )
 from src.theme import load_css_vars, read_styles_css
 from src.charts import (
@@ -116,12 +117,43 @@ def render_empty_state() -> None:
     )
 
 
-def sidebar_controls() -> dict:
+def sidebar_controls(
+    *,
+    earliest: pd.Timestamp,
+    latest: pd.Timestamp,
+    sessions: pd.DatetimeIndex,
+) -> dict:
     st.sidebar.header("분석 설정")
 
     if st.sidebar.button("⟲ 새로고침", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
+
+    earliest_d = pd.Timestamp(earliest).normalize().date()
+    latest_d = pd.Timestamp(latest).normalize().date()
+    if "as_of_picker" not in st.session_state:
+        st.session_state["as_of_picker"] = latest_d
+    else:
+        cur_d = pd.Timestamp(st.session_state["as_of_picker"]).date()
+        if cur_d < earliest_d:
+            st.session_state["as_of_picker"] = earliest_d
+        elif cur_d > latest_d:
+            st.session_state["as_of_picker"] = latest_d
+        else:
+            st.session_state["as_of_picker"] = cur_d
+
+    selected = st.sidebar.date_input(
+        "기준일",
+        min_value=earliest_d,
+        max_value=latest_d,
+        key="as_of_picker",
+    )
+    if isinstance(selected, tuple):
+        selected = selected[0] if selected else latest_d
+
+    as_of_ts = snap_to_prior_session(selected, sessions)
+    if as_of_ts.date() != pd.Timestamp(selected).date():
+        st.sidebar.caption(f"거래일로 조정: {as_of_ts.date()}")
 
     period_key = st.sidebar.selectbox(
         "분석 기간",
@@ -185,6 +217,7 @@ def sidebar_controls() -> dict:
     ]
 
     return {
+        "as_of_date": as_of_ts,
         "period_key": period_key,
         "selected_ids": selected_ids,
         "min_abs": float(min_abs),
@@ -261,11 +294,37 @@ def main() -> None:
         st.error(f"데이터베이스 상태를 확인할 수 없습니다: {_safe_message(exc)}")
         return
 
-    controls = sidebar_controls()
-
     if not status.get("db_exists") or not status.get("market_data_exists") or not status.get("usdkrw_latest_date"):
         render_empty_state()
         return
+
+    try:
+        market = cached_market_data(str(db_path), mtime)
+    except Exception as exc:
+        logger.exception("Market load failed")
+        st.error(f"시장 데이터를 불러올 수 없습니다: {_safe_message(exc)}")
+        return
+
+    if market.empty:
+        render_empty_state()
+        return
+
+    usd_mask = market["instrument_id"] == TARGET_ID
+    sessions = pd.DatetimeIndex(
+        pd.to_datetime(market.loc[usd_mask, "date"]).dt.normalize().dropna().unique()
+    ).sort_values()
+    if len(sessions) == 0:
+        render_empty_state()
+        return
+
+    earliest = pd.Timestamp(status.get("usdkrw_earliest_date") or sessions.min()).normalize()
+    latest = pd.Timestamp(status.get("usdkrw_latest_date") or sessions.max()).normalize()
+    if earliest not in sessions:
+        earliest = pd.Timestamp(sessions.min()).normalize()
+    if latest not in sessions:
+        latest = pd.Timestamp(sessions.max()).normalize()
+
+    controls = sidebar_controls(earliest=earliest, latest=latest, sessions=sessions)
 
     st.title("FX Correlation Monitor")
     st.caption("USDKRW와 주요 시장변수 간 롤링 상관관계 및 시기별 주도변수 변화를 모니터링합니다.")
@@ -275,14 +334,10 @@ def main() -> None:
         return
 
     try:
-        market = cached_market_data(str(db_path), mtime)
-        if market.empty:
-            render_empty_state()
-            return
-
         frame = build_analysis_frame(
             market,
             include_inactive=False,
+            as_of_date=controls["as_of_date"],
         )
         as_of_str = frame["analysis_as_of_date"]
         as_of = pd.Timestamp(as_of_str)
@@ -366,9 +421,9 @@ def main() -> None:
 <hr>
 <li>[KPI 카드] |20D ρ| 기준 1위 변수만 표시. 윈도우 임계값 이상일 때만 표시.</li>
 <li>[롤링 상관계수] 차트에 max(전역 임계값, 윈도우 임계값) 이상인 변수만 표시.</li>
-<li>[주도변수 랭킹] 변수 전체 표시. |20D ρ| 내림차순 정렬. 신규/전환/강화/약화/지속 국면 표시.</li>
+<li>[주도변수 랭킹] 변수 전체 표시. |20D ρ| 내림차순 정렬. 신규/전환/강화/약화/지속 상태 표시.</li>
 <li>[상관계수 히트맵] 변수 전체 표시. |20D ρ| 내림차순 정렬. 윈도우 임계값 미만이면 흐림.</li>
-<li>[주도변수 타임라인] 시기별 주도/혼합 국면 표시. 주도 없음은 회색, 혼합은 앰버로 표시.</li>
+<li>[주도변수 타임라인] 시기별 주도/혼합/없음 국면 표시. 주도는 고유색, 혼합은 앰버색, 없음은 회색으로 표시.</li>
 <li>[변수별 상세 분석] 원본값 비교 차트는 이중축, 지수화 비교 차트는 단일축 (분석 시작일=100).</li>
 <li>[역사적 충격일] 직전 252거래일 robust z-score & 자산별 절대하한 이상인 outlier 표시.</li>
 <li>[데이터 품질] 결측률 표시.</li>
@@ -452,7 +507,7 @@ def main() -> None:
 
         # --- Ranking ---
         st.markdown('<div class="fx-section-title">주도변수 랭킹</div>', unsafe_allow_html=True)
-        st.caption("최근 20D/60D/120D 상관계수를 표시하며, 국면 열에 신규/전환/강화/약화/지속을 표시합니다.")
+        st.caption("최근 20D/60D/120D 상관계수를 표시하며, 상태 열에 신규/전환/강화/약화/지속을 표시합니다.")
         rank_rows: list[dict] = []
         for iid in display_ids:
             inst = INSTRUMENT_BY_ID.get(iid)
@@ -465,7 +520,7 @@ def main() -> None:
                 {
                     "instrument_id": iid,
                     "시장변수": inst.display_name,
-                    "국면": classify_driver_status(r20, r60, r120),
+                    "상태": classify_driver_status(r20, r60, r120),
                     "20D ρ": r20,
                     "60D ρ": r60,
                     "120D ρ": r120,
@@ -484,7 +539,7 @@ def main() -> None:
             def _row_style(row: pd.Series) -> list[str]:
                 return driver_row_style(row.name in driver_rows, len(row))
 
-            visible = rank_df[["순위", "시장변수", "국면", "20D ρ", "60D ρ", "120D ρ"]]
+            visible = rank_df[["순위", "시장변수", "상태", "20D ρ", "60D ρ", "120D ρ"]]
             styler = (
                 visible.style.format(
                     {"20D ρ": "{:.2f}", "60D ρ": "{:.2f}", "120D ρ": "{:.2f}"},
@@ -518,7 +573,7 @@ def main() -> None:
 
         # --- Timeline ---
         st.markdown('<div class="fx-section-title">주도변수 타임라인</div>', unsafe_allow_html=True)
-        st.caption("주도변수가 없거나 평균 |ρ|가 임계점 미만이면 회색, 주도변수 2개 이상의 혼합 국면이면 앰버로 표시합니다.")
+        st.caption("단독주도는 고유색, 혼합은 앰버색, 없음이거나 평균 |ρ|가 임계점 미만이면 회색으로 표시합니다.")
         x_range = [start, end + pd.Timedelta(days=1)]
         as_of_tl = transformed.index.max()
         timeline_regimes: list[tuple[str, pd.DataFrame]] = []

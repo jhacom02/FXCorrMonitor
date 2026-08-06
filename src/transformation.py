@@ -82,7 +82,11 @@ def apply_as_of_cutoff(
             raise ValueError("실행일 이전의 USD/KRW 확정 종가가 없습니다.")
         as_of = prior.max()
     else:
-        as_of = pd.Timestamp(as_of_date).normalize()
+        requested = pd.Timestamp(as_of_date).normalize()
+        prior = usd.index[usd.index <= requested]
+        if len(prior) == 0:
+            raise ValueError("선택 기준일 이전의 USD/KRW 확정 종가가 없습니다.")
+        as_of = prior.max()
 
     clipped = raw_wide.loc[raw_wide.index <= as_of].copy()
     return clipped, pd.Timestamp(as_of).normalize()

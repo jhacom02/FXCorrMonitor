@@ -212,6 +212,24 @@ def lookback_range(
     return start, end
 
 
+def snap_to_prior_session(
+    selected: date | datetime | pd.Timestamp | str,
+    sessions: pd.DatetimeIndex | pd.Series | list | tuple,
+) -> pd.Timestamp:
+    """Return the latest session date on or before ``selected``.
+
+    Raises ``ValueError`` if no session is on or before the selected date.
+    """
+    selected_ts = pd.Timestamp(selected).normalize()
+    idx = pd.DatetimeIndex(pd.to_datetime(sessions)).normalize().unique().sort_values()
+    if len(idx) == 0:
+        raise ValueError("유효한 거래일 목록이 없습니다.")
+    prior = idx[idx <= selected_ts]
+    if len(prior) == 0:
+        raise ValueError("선택일 이전의 유효 거래일이 없습니다.")
+    return pd.Timestamp(prior.max()).normalize()
+
+
 def format_lookback_period(
     period_key: str,
     as_of: date | datetime | pd.Timestamp | str | None,
