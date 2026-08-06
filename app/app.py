@@ -23,6 +23,7 @@ from config.instruments import (
 from config.thresholds import (
     ANALYSIS_WINDOWS,
     DISPLAY_MIN_ABS_DEFAULT,
+    ROBUST_Z_ABS_MIN,
     display_floor,
     sig_abs,
 )
@@ -136,6 +137,14 @@ def sidebar_controls() -> dict:
         0.05,
     )
 
+    robust_z_min = st.sidebar.slider(
+        "Robust z-score |z|",
+        3.5,
+        5.0,
+        float(ROBUST_Z_ABS_MIN),
+        0.5,
+    )
+
     drivers = get_driver_instruments()
     all_options = {d.display_name: d.instrument_id for d in drivers}
     default_names = [
@@ -179,6 +188,7 @@ def sidebar_controls() -> dict:
         "period_key": period_key,
         "selected_ids": selected_ids,
         "min_abs": float(min_abs),
+        "robust_z_min": float(robust_z_min),
     }
 
 
@@ -351,8 +361,7 @@ def main() -> None:
 <hr>
 <li>전역 상관계수 임계값: 0.30 (사이드바에서 설정 가능)</li>
 <li>윈도우 상관계수 임계값: |20D ρ| ≥ 0.44 / |60D ρ| ≥ 0.25 / |120D ρ| ≥ 0.18</li>
-<li>역사적 충격 robust z-score: |robust z| ≥ 4
-<li>역사적 충격 절대하한: |통화| ≥ 2% / |주가| ≥ 5% / |VIX| ≥ 30% / |WTI| ≥ 15% / |GOLD| ≥ 3% / |금리| ≥ 25bp</li>
+<li>역사적 충격 robust z-score: |robust z| ≥ 사이드바 설정(기본 4.0, 3.5~5.0)</li><li>역사적 충격 절대하한: |통화| ≥ 2% / |주가| ≥ 5% / |VIX| ≥ 30% / |WTI| ≥ 15% / |GOLD| ≥ 3% / |금리| ≥ 25bp</li>
 <hr>
 <li>[KPI 카드] |20D ρ| 기준 1위 변수만 표시. 윈도우 임계값 이상일 때만 표시.</li>
 <li>[롤링 상관계수] 차트에 max(전역 임계값, 윈도우 임계값) 이상인 변수만 표시.</li>
@@ -487,6 +496,7 @@ def main() -> None:
                 hide_index=True,
                 height=TABLE_HEIGHT,
             )
+        st.caption("")
 
         # --- Heatmap ---
         st.markdown('<div class="fx-section-title">상관계수 히트맵</div>', unsafe_allow_html=True)
@@ -503,6 +513,7 @@ def main() -> None:
                 config=PLOTLY_CONFIG,
                 theme=None,
             )
+        st.caption("")
 
         # --- Timeline ---
         st.markdown('<div class="fx-section-title">주도변수 타임라인</div>', unsafe_allow_html=True)
@@ -625,14 +636,14 @@ def main() -> None:
             )
 
         st.markdown('<div class="fx-section-title">역사적 충격일</div>', unsafe_allow_html=True)
-        st.caption(
-            "최근 252거래일 변동성을 반영한 robust z-score와 자산별 절대하한을 함께 적용합니다."
-        )
+        st.caption("최근 252거래일 변동성을 반영한 robust z-score와 자산별 절대하한을 함께 적용합니다.")
         shocks = detect_historical_shocks(
             frame["transformed_wide"],
             display_start=start,
             display_end=end,
+            z_abs_min=controls["robust_z_min"],
         )
+        st.caption(f"극단값 감지: {0 if shocks.empty else len(shocks)}개")
         if shocks.empty:
             st.caption("조건을 충족하는 충격일이 없습니다.")
         else:
@@ -670,6 +681,8 @@ def main() -> None:
                     "절대하한": st.column_config.TextColumn("절대하한", alignment="right"),
                 },
             )
+            st.caption("")
+            st.caption("")
 
         with st.expander("데이터 품질"):
             st.markdown("**변수별 데이터 품질**")

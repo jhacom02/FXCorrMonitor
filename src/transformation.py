@@ -21,7 +21,6 @@ logger = logging.getLogger(__name__)
 
 
 def compute_log_return(values: pd.Series) -> pd.Series:
-    """ln(v_t / v_{t-1}); no forward fill. Inf → NaN."""
     v = sanitize_series(values)
     ratio = v / v.shift(1)
     with np.errstate(divide="ignore", invalid="ignore"):
@@ -30,14 +29,12 @@ def compute_log_return(values: pd.Series) -> pd.Series:
 
 
 def compute_diff_bp(values: pd.Series) -> pd.Series:
-    """(y_t - y_{t-1}) * 100 in basis points. No forward fill."""
     v = sanitize_series(values)
     out = (v - v.shift(1)) * 100.0
     return sanitize_series(out)
 
 
 def compute_level(values: pd.Series) -> pd.Series:
-    """Keep signed flow levels as-is."""
     return sanitize_series(values)
 
 

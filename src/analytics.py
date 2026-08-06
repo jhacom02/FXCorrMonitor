@@ -544,8 +544,6 @@ def multi_window_correlations(
 
 
 def _rolling_mad(prior: pd.Series, window: int) -> pd.Series:
-    """MAD of each prior window about that window's own median."""
-
     def _mad(arr: np.ndarray) -> float:
         med = float(np.median(arr))
         return float(np.median(np.abs(arr - med)))
@@ -554,7 +552,6 @@ def _rolling_mad(prior: pd.Series, window: int) -> pd.Series:
 
 
 def _robust_z_series(x: pd.Series, window: int = ROBUST_Z_WINDOW) -> pd.Series:
-    """Prior-window robust z-score; x_t is excluded from median/MAD (no look-ahead)."""
     prior = x.shift(1)
     rolling_median = prior.rolling(window=window, min_periods=window).median()
     rolling_mad = _rolling_mad(prior, window)
@@ -568,17 +565,13 @@ def detect_historical_shocks(
     transformed_wide: pd.DataFrame,
     display_start: pd.Timestamp | None = None,
     display_end: pd.Timestamp | None = None,
+    z_abs_min: float | None = None,
 ) -> pd.DataFrame:
-    """Flag historical shock days via prior-252 robust z and absolute move floors.
-
-    Z-scores are computed on the full series of valid observations per instrument;
-    only the returned rows are filtered to ``[display_start, display_end]`` when
-    those bounds are provided.
-    """
     rows: list[dict[str, Any]] = []
     if transformed_wide.empty:
         return pd.DataFrame()
 
+    threshold = float(z_abs_min) if z_abs_min is not None else float(ROBUST_Z_ABS_MIN)
     start = pd.Timestamp(display_start) if display_start is not None else None
     end = pd.Timestamp(display_end) if display_end is not None else None
 
@@ -600,7 +593,7 @@ def detect_historical_shocks(
         if s.empty:
             continue
         z = _robust_z_series(s)
-        mask = z.abs() >= ROBUST_Z_ABS_MIN
+        mask = z.abs() >= threshold
         mask &= s.abs() >= floor
         mask &= z.notna()
         if start is not None:

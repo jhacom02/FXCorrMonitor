@@ -383,3 +383,27 @@ def test_detect_historical_shocks_dual_gate_and_display_filter():
     early_dates = set(early_only["date"]) if not early_only.empty else set()
     assert idx[-3].date().isoformat() not in early_dates
     assert SHOCK_ABS_FLOOR["DXY"] == 0.02
+
+
+def test_detect_historical_shocks_respects_z_abs_min():
+    from config.thresholds import ROBUST_Z_WINDOW
+    from src.analytics import _robust_z_series, detect_historical_shocks
+
+    n = ROBUST_Z_WINDOW + 5
+    idx = pd.date_range("2015-01-01", periods=n, freq="B")
+    # High vol so |x| above FX floor can still land in 3.5–4 |z|
+    high_vol = np.full(n, 0.02)
+    high_vol[::2] = -0.02
+    s = pd.Series(high_vol, index=idx)
+    s.iloc[-1] = 0.11
+    z_last = float(_robust_z_series(s).iloc[-1])
+    assert 3.5 <= abs(z_last) < 4.0
+
+    wide = pd.DataFrame({"DXY": s})
+    at_4 = detect_historical_shocks(wide, z_abs_min=4.0)
+    at_35 = detect_historical_shocks(wide, z_abs_min=3.5)
+    last = idx[-1].date().isoformat()
+    dates_4 = set(at_4["date"]) if not at_4.empty else set()
+    dates_35 = set(at_35["date"]) if not at_35.empty else set()
+    assert last not in dates_4
+    assert last in dates_35
