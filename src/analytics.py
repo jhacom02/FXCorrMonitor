@@ -590,7 +590,7 @@ def detect_historical_shocks(
         if inst is None:
             continue
         if inst.transformation == "diff_bp":
-            unit = "bp"
+            unit = "diff_bp"
         elif inst.transformation == "log_return":
             unit = "log_return"
         else:

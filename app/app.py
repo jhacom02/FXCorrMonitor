@@ -75,6 +75,7 @@ st.set_page_config(
 
 
 _CSS_VARS: dict[str, str] = {}
+TABLE_HEIGHT = 420
 
 
 def _load_css() -> None:
@@ -344,9 +345,9 @@ def main() -> None:
                 """
 <div class="fx-detail-panel">
 <ul>
-<li>전일 확정 종가만 사용하며, 실시간 현재가는 포함하지 않습니다.</li>
-<li>Pearson 롤링 상관계수(20D/60D/120D, min_periods≈80%)를 계산합니다.</li>
+<li>Pearson 롤링 상관계수(20일, 60일, 120일)를 계산합니다.</li>
 <li>높은 상관은 동행을 의미하며, 인과관계를 의미하지 않습니다.</li>
+<li>전일 확정 종가만 사용하며, 실시간 현재가는 포함하지 않습니다.</li>
 <hr>
 <li>전역 상관계수 임계값: 0.30 (사이드바에서 설정 가능)</li>
 <li>윈도우 상관계수 임계값: |20D ρ| ≥ 0.44 / |60D ρ| ≥ 0.25 / |120D ρ| ≥ 0.18</li>
@@ -480,7 +481,12 @@ def main() -> None:
                     na_rep="—",
                 ).apply(_row_style, axis=1)
             )
-            st.dataframe(styler, use_container_width=True, hide_index=True)
+            st.dataframe(
+                styler,
+                use_container_width=True,
+                hide_index=True,
+                height=TABLE_HEIGHT,
+            )
 
         # --- Heatmap ---
         st.markdown('<div class="fx-section-title">상관계수 히트맵</div>', unsafe_allow_html=True)
@@ -630,28 +636,39 @@ def main() -> None:
         if shocks.empty:
             st.caption("조건을 충족하는 충격일이 없습니다.")
         else:
-            show_rows: list[dict] = []
-            for _, r in shocks.iterrows():
-                unit = str(r["unit"])
-                val = float(r["value"])
+            change_txt: list[str] = []
+            floor_txt: list[str] = []
+            for val, floor, unit in zip(
+                shocks["value"], shocks["abs_threshold"], shocks["unit"]
+            ):
                 if unit == "log_return":
-                    change_txt = f"{val * 100:.2f}%"
+                    change_txt.append(f"{float(val) * 100:.2f}%")
+                    floor_txt.append(f"{float(floor) * 100:.2f}%")
                 else:
-                    change_txt = f"{val:.2f}bp"
-                show_rows.append(
-                    {
-                        "날짜": r["date"],
-                        "시장변수": r["display_name"],
-                        "일간변화": change_txt,
-                        "robust z-score": f"{float(r['robust_z']):.2f}",
-                        "절대하한": f"{float(r['abs_threshold']):.2f}",
-                        "단위": unit,
-                    }
-                )
+                    change_txt.append(f"{float(val):.2f}bp")
+                    floor_txt.append(f"{float(floor):.2f}bp")
+            show_df = pd.DataFrame(
+                {
+                    "날짜": shocks["date"],
+                    "시장변수": shocks["display_name"],
+                    "일간변화": change_txt,
+                    "robust z-score": shocks["robust_z"].astype(float),
+                    "절대하한": floor_txt,
+                    "단위": shocks["unit"],
+                }
+            )
             st.dataframe(
-                pd.DataFrame(show_rows),
+                show_df,
                 use_container_width=True,
                 hide_index=True,
+                height=TABLE_HEIGHT,
+                column_config={
+                    "일간변화": st.column_config.TextColumn("일간변화", alignment="right"),
+                    "robust z-score": st.column_config.NumberColumn(
+                        "robust z-score", format="%.2f"
+                    ),
+                    "절대하한": st.column_config.TextColumn("절대하한", alignment="right"),
+                },
             )
 
         with st.expander("데이터 품질"):
@@ -671,7 +688,10 @@ def main() -> None:
             meta_df = pd.DataFrame(meta_rows)
             if not meta_df.empty:
                 st.dataframe(
-                    meta_df.style.format({"결측률": "{:.2%}"}, na_rep="—"),
+                    meta_df.style.format(
+                        {"관측수": "{:,.0f}", "결측률": "{:.2%}"},
+                        na_rep="—",
+                    ),
                     use_container_width=True,
                     hide_index=True,
                 )
