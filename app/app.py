@@ -1,4 +1,4 @@
-"""USDKRW Driver Monitor — Streamlit dashboard (static settled closes only)."""
+"""FX Correlation Monitor — Streamlit dashboard (static settled closes only)."""
 
 from __future__ import annotations
 
@@ -69,7 +69,7 @@ logger = logging.getLogger(__name__)
 setup_logging(False)
 
 st.set_page_config(
-    page_title="USDKRW Driver Monitor",
+    page_title="FX Correlation Monitor",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -104,7 +104,7 @@ def _safe_message(exc: Exception) -> str:
 
 
 def render_empty_state() -> None:
-    st.title("USDKRW Driver Monitor")
+    st.title("FX Correlation Monitor")
     st.caption("USDKRW와 주요 시장변수 간 롤링 상관관계 및 시기별 주도변수 변화를 모니터링합니다.")
     st.info(
         "SQLite에 적재된 데이터가 없습니다.\n\n"
@@ -267,7 +267,7 @@ def main() -> None:
         render_empty_state()
         return
 
-    st.title("USDKRW Driver Monitor")
+    st.title("FX Correlation Monitor")
     st.caption("USDKRW와 주요 시장변수 간 롤링 상관관계 및 시기별 주도변수 변화를 모니터링합니다.")
 
     if not controls["selected_ids"]:
