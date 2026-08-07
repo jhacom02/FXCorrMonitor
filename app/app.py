@@ -162,7 +162,7 @@ def sidebar_controls(
 
     as_of_ts = snap_to_prior_session(selected, sessions)
     if as_of_ts.date() != pd.Timestamp(selected).date():
-        st.sidebar.caption(f"거래일로 조정: {as_of_ts.strftime('%Y-%m-%d')}")
+        st.sidebar.caption(f"※ 거래일 조정: {as_of_ts.strftime('%Y-%m-%d')}")
 
     period_key = st.sidebar.selectbox(
         "분석 기간",
@@ -645,11 +645,18 @@ def main() -> None:
 
             usd_full = raw_full[TARGET_ID] if TARGET_ID in raw_full.columns else pd.Series(dtype=float)
             drv_full = raw_full[pick] if pick in raw_full.columns else pd.Series(dtype=float)
-            base_day = rebase_base_date(usd_full, drv_full, start=start)
-            usd_idx = rebase_series_to_100(usd_full, start, base_date=base_day)
-            drv_idx = rebase_series_to_100(drv_full, start, base_date=base_day)
-            usd_idx = usd_idx.loc[(usd_idx.index >= start) & (usd_idx.index <= end)]
-            drv_idx = drv_idx.loc[(drv_idx.index >= start) & (drv_idx.index <= end)]
+            skip_driver_index = pick == "F_NET"
+            if skip_driver_index:
+                base_day = rebase_base_date(usd_full, start=start)
+                usd_idx = rebase_series_to_100(usd_full, start, base_date=base_day)
+                usd_idx = usd_idx.loc[(usd_idx.index >= start) & (usd_idx.index <= end)]
+                drv_idx = pd.Series(dtype=float)
+            else:
+                base_day = rebase_base_date(usd_full, drv_full, start=start)
+                usd_idx = rebase_series_to_100(usd_full, start, base_date=base_day)
+                drv_idx = rebase_series_to_100(drv_full, start, base_date=base_day)
+                usd_idx = usd_idx.loc[(usd_idx.index >= start) & (usd_idx.index <= end)]
+                drv_idx = drv_idx.loc[(drv_idx.index >= start) & (drv_idx.index <= end)]
             if base_day is not None:
                 idx_title = f"지수화 비교 ({pd.Timestamp(base_day).date()} = 100)"
             else:
@@ -665,6 +672,8 @@ def main() -> None:
                 config=PLOTLY_CONFIG,
                 theme=None,
             )
+            if skip_driver_index:
+                st.caption("※ F_NET(외국인순매수)은 지수화 비교에서 제외합니다.")
 
             pick_multi = multi[multi["instrument_id"] == pick] if not multi.empty else pd.DataFrame()
             if pick_multi.empty and pick in transformed.columns:
