@@ -1,4 +1,4 @@
-"""FX Correlation Monitor — Streamlit dashboard (static settled closes only)."""
+"""FX Correlation Monitor — Streamlit dashboard."""
 
 from __future__ import annotations
 
