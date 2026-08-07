@@ -267,6 +267,26 @@ def test_snap_to_prior_session_weekend():
         snap_to_prior_session("2024-06-01", sessions)
 
 
+def test_prior_confirmed_session_excludes_today():
+    from datetime import date as date_cls
+
+    from src.utils import prior_confirmed_session
+
+    sessions = pd.DatetimeIndex(["2026-07-30", "2026-07-31", "2026-08-03"])
+    assert prior_confirmed_session(sessions, run_date=date_cls(2026, 8, 3)) == pd.Timestamp(
+        "2026-07-31"
+    )
+    # Weekend run: still last session before calendar today
+    assert prior_confirmed_session(sessions, run_date=date_cls(2026, 8, 2)) == pd.Timestamp(
+        "2026-07-31"
+    )
+    with pytest.raises(ValueError, match="실행일 이전"):
+        prior_confirmed_session(
+            pd.DatetimeIndex(["2026-08-03"]),
+            run_date=date_cls(2026, 8, 3),
+        )
+
+
 def test_lookback_from_snapped_as_of():
     from src.utils import lookback_range, snap_to_prior_session
 

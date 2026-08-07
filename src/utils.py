@@ -230,6 +230,21 @@ def snap_to_prior_session(
     return pd.Timestamp(prior.max()).normalize()
 
 
+def prior_confirmed_session(
+    sessions: pd.DatetimeIndex | pd.Series | list | tuple,
+    *,
+    run_date: date | datetime | pd.Timestamp | None = None,
+) -> pd.Timestamp:
+    today = pd.Timestamp(run_date or date.today()).normalize()
+    idx = pd.DatetimeIndex(pd.to_datetime(sessions)).normalize().unique().sort_values()
+    if len(idx) == 0:
+        raise ValueError("유효한 거래일 목록이 없습니다.")
+    prior = idx[idx < today]
+    if len(prior) == 0:
+        raise ValueError("실행일 이전의 유효 거래일이 없습니다.")
+    return pd.Timestamp(prior.max()).normalize()
+
+
 def format_lookback_period(
     period_key: str,
     as_of: date | datetime | pd.Timestamp | str | None,

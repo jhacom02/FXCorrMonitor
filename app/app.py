@@ -49,6 +49,7 @@ from src.utils import (
     format_fx,
     format_lookback_period,
     lookback_range,
+    prior_confirmed_session,
     setup_logging,
     snap_to_prior_session,
 )
@@ -130,27 +131,34 @@ def sidebar_controls(
         st.rerun()
 
     earliest_d = pd.Timestamp(earliest).normalize().date()
-    latest_d = pd.Timestamp(latest).normalize().date()
+    try:
+        confirmed_ts = prior_confirmed_session(sessions)
+    except ValueError:
+        confirmed_ts = pd.Timestamp(latest).normalize()
+    confirmed_d = confirmed_ts.date()
+    if confirmed_d < earliest_d:
+        confirmed_d = earliest_d
+
     if "as_of_picker" not in st.session_state:
-        st.session_state["as_of_picker"] = latest_d
+        st.session_state["as_of_picker"] = confirmed_d
     else:
         cur_d = pd.Timestamp(st.session_state["as_of_picker"]).date()
         if cur_d < earliest_d:
             st.session_state["as_of_picker"] = earliest_d
-        elif cur_d > latest_d:
-            st.session_state["as_of_picker"] = latest_d
+        elif cur_d > confirmed_d:
+            st.session_state["as_of_picker"] = confirmed_d
         else:
             st.session_state["as_of_picker"] = cur_d
 
     selected = st.sidebar.date_input(
         "기준일",
         min_value=earliest_d,
-        max_value=latest_d,
+        max_value=confirmed_d,
         format="YYYY-MM-DD",
         key="as_of_picker",
     )
     if isinstance(selected, tuple):
-        selected = selected[0] if selected else latest_d
+        selected = selected[0] if selected else confirmed_d
 
     as_of_ts = snap_to_prior_session(selected, sessions)
     if as_of_ts.date() != pd.Timestamp(selected).date():
