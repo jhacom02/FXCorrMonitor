@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 DISPLAY_MIN_ABS_DEFAULT = 0.30
-SIG_ABS_BY_WINDOW: dict[int, float] = {5: 0.88, 20: 0.44, 60: 0.25, 120: 0.18}
+SIG_ABS_BY_WINDOW: dict[int, float] = {5: 0.60, 20: 0.44, 60: 0.25, 120: 0.18}
 ANALYSIS_WINDOWS: tuple[int, ...] = (5, 20, 60, 120)
 
 STATUS_ABS_DELTA = 0.10

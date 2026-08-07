@@ -146,6 +146,7 @@ def sidebar_controls(
         "기준일",
         min_value=earliest_d,
         max_value=latest_d,
+        format="YYYY-MM-DD",
         key="as_of_picker",
     )
     if isinstance(selected, tuple):
@@ -153,7 +154,7 @@ def sidebar_controls(
 
     as_of_ts = snap_to_prior_session(selected, sessions)
     if as_of_ts.date() != pd.Timestamp(selected).date():
-        st.sidebar.caption(f"거래일로 조정: {as_of_ts.date()}")
+        st.sidebar.caption(f"거래일로 조정: {as_of_ts.strftime('%Y-%m-%d')}")
 
     period_key = st.sidebar.selectbox(
         "분석 기간",
@@ -243,6 +244,10 @@ def render_meta_banner(as_of_str: str, period_key: str) -> None:
         f"""
         <div class="fx-meta-banner">
           <div class="fx-meta-grid">
+            <div class="fx-meta-item">
+              <div class="fx-meta-label">분석 대상</div>
+              <div class="fx-meta-value">USDKRW</div>
+            </div>
             <div class="fx-meta-item">
               <div class="fx-meta-label">기준일</div>
               <div class="fx-meta-value">{as_of_str}</div>
@@ -399,7 +404,7 @@ def main() -> None:
             driver_kpi = "—" if driver_id == DRIVER_NONE else snap["driver_name"]
             kpi_card("오늘자 주도변수", driver_kpi)
         with c2:
-            kpi_card("롤링 상관계수", rho_txt)
+            kpi_card("롤링 상관계수 (20D)", rho_txt)
         with c3:
             kpi_card("USDKRW", format_fx(latest_fx))
         with c4:
@@ -415,7 +420,7 @@ def main() -> None:
 <li>전일 확정 종가만 사용하며, 실시간 현재가는 포함하지 않습니다. (출처: Infomax)</li>
 <hr>
 <li>전역 상관계수 임계값: 0.30 (사이드바 설정 가능)</li>
-<li>윈도우 상관계수 임계값(t-test, p=0.05): |5D ρ| ≥ 0.88 / |20D ρ| ≥ 0.44 / |60D ρ| ≥ 0.25 / |120D ρ| ≥ 0.18</li>
+<li>윈도우 상관계수 임계값(t-test, p=0.05): |5D ρ| ≥ 0.60 / |20D ρ| ≥ 0.44 / |60D ρ| ≥ 0.25 / |120D ρ| ≥ 0.18</li>
 <li>역사적 충격 robust z-score: |robust z| ≥ 4.0 (사이드바 설정)</li>
 <li>역사적 충격 절대하한: |통화| ≥ 2% / |주가| ≥ 5% / |VIX| ≥ 30% / |WTI| ≥ 15% / |GOLD| ≥ 3% / |금리| ≥ 20bp</li>
 <hr>

@@ -69,7 +69,7 @@ pytest
 | 입력 | 인포맥스 Excel (시트별 종목) |
 | 저장 | SQLite `data/fx_dashboard.db` |
 | 종목 매핑 | [`config/instruments.py`](config/instruments.py) |
-| 유의선·필터 | [`config/thresholds.py`](config/thresholds.py) (예: 5D 0.88 / 20D 0.44 / 60D 0.25 / 120D 0.18) |
+| 유의선·필터 | [`config/thresholds.py`](config/thresholds.py) (예: 5D 0.60 / 20D 0.44 / 60D 0.25 / 120D 0.18) |
 
 파생 수익률·상관계수는 DB에 넣지 않고, 대시보드 조회 시 계산합니다.
 

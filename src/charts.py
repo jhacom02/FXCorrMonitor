@@ -205,8 +205,7 @@ def build_rank_line(
     for i, row in enumerate(ranking.itertuples()):
         mark = circles[i] if i < len(circles) else f"{i + 1}."
         rho = float(row.rolling_correlation)
-        sign = "+" if rho > 0 else ""
-        parts.append(f"{mark} {row.display_name} ({sign}{rho:.2f})")
+        parts.append(f"{mark} {row.display_name} ({rho:.2f})")
     return f"오늘자 주도변수: " + ",  ".join(parts)
 
 
