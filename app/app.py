@@ -410,12 +410,12 @@ def main() -> None:
                 """
 <div class="fx-detail-panel">
 <ul>
-<li>Pearson 롤링 상관계수(20일, 60일, 120일)를 계산합니다.</li>
+<li>Pearson 롤링 상관계수(5일, 20일, 60일, 120일)를 계산합니다.</li>
 <li>높은 상관은 동행을 의미하며, 인과관계를 의미하지 않습니다.</li>
 <li>전일 확정 종가만 사용하며, 실시간 현재가는 포함하지 않습니다. (출처: Infomax)</li>
 <hr>
 <li>전역 상관계수 임계값: 0.30 (사이드바 설정 가능)</li>
-<li>윈도우 상관계수 임계값(t-test, p=0.05): |20D ρ| ≥ 0.44 / |60D ρ| ≥ 0.25 / |120D ρ| ≥ 0.18</li>
+<li>윈도우 상관계수 임계값(t-test, p=0.05): |5D ρ| ≥ 0.88 / |20D ρ| ≥ 0.44 / |60D ρ| ≥ 0.25 / |120D ρ| ≥ 0.18</li>
 <li>역사적 충격 robust z-score: |robust z| ≥ 4.0 (사이드바 설정)</li>
 <li>역사적 충격 절대하한: |통화| ≥ 2% / |주가| ≥ 5% / |VIX| ≥ 30% / |WTI| ≥ 15% / |GOLD| ≥ 3% / |금리| ≥ 20bp</li>
 <hr>
@@ -492,7 +492,7 @@ def main() -> None:
         with f1:
             st.selectbox(
                 "롤링 윈도우",
-                ["20D", "60D", "120D"],
+                ["5D", "20D", "60D", "120D"],
                 key="roll_window_label",
             )
         with f2:
@@ -507,12 +507,13 @@ def main() -> None:
 
         # --- Ranking ---
         st.markdown('<div class="fx-section-title">주도변수 랭킹</div>', unsafe_allow_html=True)
-        st.caption("최근 20D/60D/120D 상관계수를 표시하며, 상태 열에 신규/전환/강화/약화/지속을 표시합니다.")
+        st.caption("최근 5D/20D/60D/120D 상관계수를 표시하며, 상태 열에 신규/전환/강화/약화/지속을 표시합니다.")
         rank_rows: list[dict] = []
         for iid in display_ids:
             inst = INSTRUMENT_BY_ID.get(iid)
             if inst is None:
                 continue
+            r5 = _rho_from_multi(multi, iid, 5)
             r20 = _rho_from_multi(multi, iid, 20)
             r60 = _rho_from_multi(multi, iid, 60)
             r120 = _rho_from_multi(multi, iid, 120)
@@ -521,6 +522,7 @@ def main() -> None:
                     "instrument_id": iid,
                     "시장변수": inst.display_name,
                     "상태": classify_driver_status(r20, r60, r120),
+                    "5D ρ": r5,
                     "20D ρ": r20,
                     "60D ρ": r60,
                     "120D ρ": r120,
@@ -539,10 +541,15 @@ def main() -> None:
             def _row_style(row: pd.Series) -> list[str]:
                 return driver_row_style(row.name in driver_rows, len(row))
 
-            visible = rank_df[["순위", "시장변수", "상태", "20D ρ", "60D ρ", "120D ρ"]]
+            visible = rank_df[["순위", "시장변수", "상태", "5D ρ", "20D ρ", "60D ρ", "120D ρ"]]
             styler = (
                 visible.style.format(
-                    {"20D ρ": "{:.2f}", "60D ρ": "{:.2f}", "120D ρ": "{:.2f}"},
+                    {
+                        "5D ρ": "{:.2f}",
+                        "20D ρ": "{:.2f}",
+                        "60D ρ": "{:.2f}",
+                        "120D ρ": "{:.2f}",
+                    },
                     na_rep="—",
                 ).apply(_row_style, axis=1)
             )
@@ -577,7 +584,7 @@ def main() -> None:
         x_range = [start, end + pd.Timedelta(days=1)]
         as_of_tl = transformed.index.max()
         timeline_regimes: list[tuple[str, pd.DataFrame]] = []
-        for w, label in zip(ANALYSIS_WINDOWS, ("20D", "60D", "120D")):
+        for w, label in zip(ANALYSIS_WINDOWS, ("5D", "20D", "60D", "120D")):
             timeline_regimes.append(
                 (label, regimes_for_window(transformed, selected_drivers, w))
             )
@@ -654,9 +661,11 @@ def main() -> None:
                     windows=list(ANALYSIS_WINDOWS),
                     as_of_date=transformed.index.max(),
                 )
-            m20 = m60 = m120 = np.nan
+            m5 = m20 = m60 = m120 = np.nan
             for _, r in pick_multi.iterrows():
-                if int(r["window"]) == 20:
+                if int(r["window"]) == 5:
+                    m5 = r["rolling_correlation"]
+                elif int(r["window"]) == 20:
                     m20 = r["rolling_correlation"]
                 elif int(r["window"]) == 60:
                     m60 = r["rolling_correlation"]
@@ -677,6 +686,7 @@ def main() -> None:
 <div class="fx-detail-panel">
 <div>[USDKRW vs {inst.display_name}]</div>
 <ul>
+<li>5D ρ: {format_corr(m5)}</li>
 <li>20D ρ: {format_corr(m20)}</li>
 <li>60D ρ: {format_corr(m60)}</li>
 <li>120D ρ: {format_corr(m120)}</li>

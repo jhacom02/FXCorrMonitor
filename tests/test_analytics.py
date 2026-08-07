@@ -319,10 +319,12 @@ def test_regime_label_on_date_none_is_dash():
 def test_sig_abs_and_display_floor():
     from config.thresholds import DISPLAY_MIN_ABS_DEFAULT, display_floor, sig_abs
 
+    assert sig_abs(5) == 0.88
     assert sig_abs(20) == 0.44
     assert sig_abs(60) == 0.25
     assert sig_abs(120) == 0.18
     assert display_floor(20, DISPLAY_MIN_ABS_DEFAULT) == sig_abs(20)
+    assert display_floor(5, 0.50) == sig_abs(5)
     assert display_floor(60, DISPLAY_MIN_ABS_DEFAULT) == DISPLAY_MIN_ABS_DEFAULT
     assert display_floor(120, 0.10) == sig_abs(120)
 

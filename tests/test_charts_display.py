@@ -111,12 +111,12 @@ def test_correlation_heatmap_builds_with_labels_and_desaturate():
     from src.charts import HEATMAP_COLORSCALE, correlation_heatmap
 
     rows = []
-    for iid, name, c20, c60, c120 in [
-        ("KOSPI", "KOSPI", 0.55, 0.40, 0.20),
-        ("DXY", "DXY", -0.12, -0.05, 0.02),
-        ("VIX", "VIX", -0.48, -0.30, -0.10),
+    for iid, name, c5, c20, c60, c120 in [
+        ("KOSPI", "KOSPI", 0.90, 0.55, 0.40, 0.20),
+        ("DXY", "DXY", 0.10, -0.12, -0.05, 0.02),
+        ("VIX", "VIX", -0.92, -0.48, -0.30, -0.10),
     ]:
-        for w, c in ((20, c20), (60, c60), (120, c120)):
+        for w, c in ((5, c5), (20, c20), (60, c60), (120, c120)):
             rows.append(
                 {
                     "instrument_id": iid,
@@ -129,14 +129,14 @@ def test_correlation_heatmap_builds_with_labels_and_desaturate():
     fig = correlation_heatmap(multi, current_driver_id="KOSPI")
     assert len(fig.data) == 1
     hm = fig.data[0]
-    assert list(hm.x) == ["20D", "60D", "120D"]
+    assert list(hm.x) == ["5D", "20D", "60D", "120D"]
     assert "KOSPI" in list(hm.y)
     assert hm.colorscale[0][1].lower() == HEATMAP_COLORSCALE[0][1].lower()
     # Low-|ρ| cell is desaturated toward 0 for fill (DXY 20D = -0.12)
     kospi_idx = list(hm.y).index("KOSPI")
     dxy_idx = list(hm.y).index("DXY")
-    assert abs(hm.z[kospi_idx][0] - 0.55) < 1e-9
-    assert abs(hm.z[dxy_idx][0] - (-0.12 * 0.6)) < 1e-9
+    assert abs(hm.z[kospi_idx][1] - 0.55) < 1e-9
+    assert abs(hm.z[dxy_idx][1] - (-0.12 * 0.6)) < 1e-9
 
 
 def test_rebase_series_to_100_uses_analysis_start():

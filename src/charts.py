@@ -410,7 +410,7 @@ def correlation_heatmap(
         values="rolling_correlation",
         aggfunc="last",
     )
-    cols = [c for c in ["20D", "60D", "120D"] if c in pivot.columns]
+    cols = [c for c in ["5D", "20D", "60D", "120D"] if c in pivot.columns]
     pivot = pivot.reindex(columns=cols)
 
     if "20D" in pivot.columns:
@@ -429,6 +429,7 @@ def correlation_heatmap(
         y_labels.append(name)
 
     floors = {
+        5: sig_abs(5),
         20: sig_abs(20),
         60: sig_abs(60),
         120: sig_abs(120),
