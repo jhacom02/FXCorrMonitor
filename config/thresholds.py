@@ -23,12 +23,12 @@ SHOCK_ABS_FLOOR: dict[str, float] = {
     "SPX": 0.05,
     "NDX": 0.05,
     "VIX": 0.30,
-    "WTI": 0.15,
+    "WTI": 0.10,
     "GOLD": 0.03,
-    "UST2Y": 20.0,
-    "UST10Y": 20.0,
-    "KTB3Y": 20.0,
-    "KTB10Y": 20.0,
+    "UST2Y": 15.0,
+    "UST10Y": 15.0,
+    "KTB3Y": 15.0,
+    "KTB10Y": 15.0,
 }
 
 CORR_GUIDE_SOFT = 0.30
