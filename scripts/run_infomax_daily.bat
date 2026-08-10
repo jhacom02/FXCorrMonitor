@@ -17,7 +17,7 @@ if not errorlevel 1 (
   exit /b 0
 )
 
-git commit -m "chore: daily Infomax snapshot DB update"
+git commit -m "Daily Batch: DB Update"
 if errorlevel 1 exit /b %ERRORLEVEL%
 
 git push origin main
