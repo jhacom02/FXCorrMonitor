@@ -2,7 +2,7 @@
 
 USDKRW와 주요 시장변수 간 롤링 상관관계 및 시기별 주도변수 변화를 모니터링합니다.
 
-인포맥스에서 수동 추출한 Excel을 SQLite에 적재하고, Streamlit이 그 DB만 조회하는 **정적 대시보드**입니다. 실시간 시세·외부 AI API는 사용하지 않습니다.
+Infomax IMDP Snapshot을 Windows 작업 스케줄러(매일 **06:00**)로 자동 적재하고, Streamlit은 SQLite만 조회합니다.
 
 > 상관관계는 동행을 나타낼 뿐, **인과관계를 의미하지 않습니다.**
 
@@ -34,10 +34,11 @@ USDKRW와 주요 시장변수 간 롤링 상관관계 및 시기별 주도변수
 - 사이드바 **기준일**(전 거래일)부터 **분석 기간**만큼 조회
 - 시차 정렬은 **서울환시** 기준 (`same_day` / `previous_us_close`)
 - 가격·지수는 로그수익, 금리는 bp 차분, 수급은 레벨로 변환 후 상관 계산
+- 데이터 갱신: 작업 스케줄러 **06:00** → `scripts/run_infomax_daily.bat`
 
 ## 기술 스택
 
-Python 3.11+, pandas, NumPy, SQLite, Streamlit, Plotly
+Python 3.11+, pandas, NumPy, SQLite, Streamlit, Plotly, pywin32 (Windows COM)
 
 ## 빠른 시작
 
@@ -51,8 +52,13 @@ Windows:
 .venv\Scripts\activate
 pip install -r requirements.txt
 python main.py init-db
-python scripts/ingest_excel.py --file "data/raw/infomax_raw.xlsx"
 streamlit run app/app.py --server.port 8502
+```
+
+일일 적재(작업 스케줄러와 동일 진입점):
+
+```bat
+scripts\run_infomax_daily.bat
 ```
 
 - 로컬: [http://localhost:8502](http://localhost:8502)
@@ -62,11 +68,13 @@ streamlit run app/app.py --server.port 8502
 pytest
 ```
 
+상세: [`FXCorrMonitor_doc.md`](FXCorrMonitor_doc.md)
+
 ## 데이터·설정
 
 | 항목 | 설명 |
 |------|------|
-| 입력 | 인포맥스 Excel (시트별 종목) |
+| 입력 | Infomax IMDP Snapshot (COM 리프레시 → 16셀) |
 | 저장 | SQLite `data/fx_dashboard.db` |
 | 종목 매핑 | [`config/instruments.py`](config/instruments.py) |
 | 유의선·필터 | [`config/thresholds.py`](config/thresholds.py) (예: 5D 0.60 / 20D 0.44 / 60D 0.25 / 120D 0.18) |
@@ -80,8 +88,9 @@ pytest
 FXCorrMonitor/
 ├─ app/           # Streamlit UI·CSS
 ├─ config/        # 종목·임계값
-├─ src/           # 적재·변환·분석·차트
-├─ scripts/       # Excel 적재 CLI
+├─ src/           # 변환·분석·차트·DB
+├─ infomax/       # IMDP Snapshot 일일 ETL (Excel COM)
+├─ scripts/       # 일일 ETL bat·CLI
 ├─ tests/
-└─ main.py        # init-db / ingest / run
+└─ main.py        # init-db / run
 ```

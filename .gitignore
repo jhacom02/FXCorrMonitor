@@ -16,5 +16,7 @@ build/
 Thumbs.db
 *.log
 .env
+data/.infomax_daily.lock
 .idea/
 .vscode/
+FXCorrMonitor_doc.md

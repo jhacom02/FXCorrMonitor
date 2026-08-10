@@ -43,6 +43,28 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ingest_snapshot(args: argparse.Namespace) -> int:
+    from infomax.snapshot_daily import main as snapshot_main
+
+    argv: list[str] = []
+    if args.date:
+        argv += ["--date", args.date]
+    if args.lookback is not None:
+        argv += ["--lookback", str(args.lookback)]
+    if args.excel:
+        argv += ["--excel", args.excel]
+    if args.db:
+        argv += ["--db", args.db]
+    if args.dry_run:
+        argv.append("--dry-run")
+    if args.verbose:
+        argv.append("--verbose")
+    if args.skip_lock:
+        argv.append("--skip-lock")
+    if args.poc:
+        argv.append("--poc")
+    return snapshot_main(argv)
+
 def cmd_run(args: argparse.Namespace) -> int:
     app_path = PROJECT_ROOT / "app" / "app.py"
     port = args.port if args.port is not None else 8502
@@ -77,6 +99,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_ing.add_argument("--replace", action="store_true")
     p_ing.add_argument("--verbose", action="store_true")
     p_ing.set_defaults(func=cmd_ingest)
+
+    p_snap = sub.add_parser(
+        "ingest-snapshot",
+        help="Daily Infomax IMDP snapshot ETL (Excel COM)",
+    )
+    p_snap.add_argument("--date", help="Single YYYY-MM-DD (skips lookback)")
+    p_snap.add_argument("--lookback", type=int, default=None)
+    p_snap.add_argument("--excel", default=None)
+    p_snap.add_argument("--db", default=str(DEFAULT_DB_PATH))
+    p_snap.add_argument("--dry-run", action="store_true")
+    p_snap.add_argument("--verbose", action="store_true")
+    p_snap.add_argument("--skip-lock", action="store_true")
+    p_snap.add_argument("--poc", action="store_true")
+    p_snap.set_defaults(func=cmd_ingest_snapshot)
 
     p_run = sub.add_parser("run", help="Launch Streamlit dashboard")
     p_run.add_argument("--port", type=int, default=8502, help="Server port (default: 8502)")
