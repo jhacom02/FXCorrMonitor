@@ -17,6 +17,8 @@ from config.thresholds import (
     ROBUST_Z_ABS_MIN,
     ROBUST_Z_WINDOW,
     SHOCK_ABS_FLOOR,
+    SHOCK_FLOOR_LABEL,
+    SHOCK_FLOOR_SCALE,
     STATUS_ABS_DELTA,
     sig_abs,
 )
@@ -566,6 +568,7 @@ def detect_historical_shocks(
     display_start: pd.Timestamp | None = None,
     display_end: pd.Timestamp | None = None,
     z_abs_min: float | None = None,
+    raw_aligned_wide: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     if transformed_wide.empty:
@@ -574,22 +577,37 @@ def detect_historical_shocks(
     threshold = float(z_abs_min) if z_abs_min is not None else float(ROBUST_Z_ABS_MIN)
     start = pd.Timestamp(display_start) if display_start is not None else None
     end = pd.Timestamp(display_end) if display_end is not None else None
+    raw = raw_aligned_wide if raw_aligned_wide is not None else pd.DataFrame()
 
-    for iid in transformed_wide.columns:
+    for iid in list(dict.fromkeys([*transformed_wide.columns, *raw.columns])):
         floor = SHOCK_ABS_FLOOR.get(iid)
         if floor is None:
             continue
         inst = INSTRUMENT_BY_ID.get(iid)
         if inst is None:
             continue
-        if inst.transformation == "diff_bp":
+        scale = SHOCK_FLOOR_SCALE.get(iid)
+        if scale is None:
+            continue
+
+        if scale == "abs":
+            if raw.empty or iid not in raw.columns:
+                continue
+            s = sanitize_diff(raw[iid])
+            unit = "abs_change"
+        elif scale == "bp":
+            if iid not in transformed_wide.columns or inst.transformation != "diff_bp":
+                continue
+            s = transformed_wide[iid].dropna()
             unit = "diff_bp"
-        elif inst.transformation == "log_return":
+        elif scale == "return":
+            if iid not in transformed_wide.columns or inst.transformation != "log_return":
+                continue
+            s = transformed_wide[iid].dropna()
             unit = "log_return"
         else:
             continue
 
-        s = transformed_wide[iid].dropna()
         if s.empty:
             continue
         z = _robust_z_series(s)
@@ -612,6 +630,7 @@ def detect_historical_shocks(
                     "robust_z": float(z.loc[dt]),
                     "abs_threshold": float(floor),
                     "unit": unit,
+                    "unit_label": SHOCK_FLOOR_LABEL.get(iid, unit),
                 }
             )
 
@@ -620,3 +639,12 @@ def detect_historical_shocks(
     return pd.DataFrame(rows).sort_values(
         ["date", "instrument_id"], ascending=[False, True]
     ).reset_index(drop=True)
+
+
+def sanitize_diff(series: pd.Series) -> pd.Series:
+    """Daily absolute-level change for abs-scale shock floors."""
+    s = pd.to_numeric(series, errors="coerce").dropna().sort_index()
+    if s.empty:
+        return s
+    s.index = pd.DatetimeIndex(pd.to_datetime(s.index)).normalize()
+    return s.diff().dropna()

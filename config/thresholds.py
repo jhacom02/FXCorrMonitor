@@ -15,20 +15,57 @@ ROBUST_Z_WINDOW = 252
 ROBUST_Z_ABS_MIN = 4.0
 
 SHOCK_ABS_FLOOR: dict[str, float] = {
-    "DXY": 0.02,
-    "USDJPY": 0.02,
-    "USDCNH": 0.02,
+    "USDKRW": 23.0,
+    "DXY": 1.4,
+    "USDJPY": 2.7,
+    "USDCNH": 0.07,
     "EURUSD": 0.02,
-    "KOSPI": 0.05,
-    "SPX": 0.05,
-    "NDX": 0.05,
+    "KOSPI": 0.038,
+    "SPX": 0.027,
+    "NDX": 0.035,
     "VIX": 0.30,
-    "WTI": 0.10,
+    "WTI": 0.084,
     "GOLD": 0.03,
-    "UST2Y": 15.0,
-    "UST10Y": 15.0,
-    "KTB3Y": 15.0,
-    "KTB10Y": 15.0,
+    "UST2Y": 18.0,
+    "UST10Y": 17.0,
+    "KTB3Y": 12.0,
+    "KTB10Y": 12.0,
+}
+
+SHOCK_FLOOR_SCALE: dict[str, str] = {
+    "USDKRW": "abs",
+    "DXY": "abs",
+    "USDJPY": "abs",
+    "USDCNH": "abs",
+    "EURUSD": "abs",
+    "KOSPI": "return",
+    "SPX": "return",
+    "NDX": "return",
+    "VIX": "return",
+    "WTI": "return",
+    "GOLD": "return",
+    "UST2Y": "bp",
+    "UST10Y": "bp",
+    "KTB3Y": "bp",
+    "KTB10Y": "bp",
+}
+
+SHOCK_FLOOR_LABEL: dict[str, str] = {
+    "USDKRW": "원",
+    "DXY": "pt",
+    "USDJPY": "엔",
+    "USDCNH": "위안",
+    "EURUSD": "달러",
+    "KOSPI": "%",
+    "SPX": "%",
+    "NDX": "%",
+    "VIX": "%",
+    "WTI": "%",
+    "GOLD": "%",
+    "UST2Y": "bp",
+    "UST10Y": "bp",
+    "KTB3Y": "bp",
+    "KTB10Y": "bp",
 }
 
 CORR_GUIDE_SOFT = 0.30

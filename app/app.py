@@ -428,9 +428,9 @@ def main() -> None:
 <li>전일 확정 종가만 사용하며, 실시간 현재가는 포함하지 않습니다. (출처: Infomax)</li>
 <hr>
 <li>전역 상관계수 임계값: 0.30 (사이드바 설정 가능)</li>
-<li>윈도우 상관계수 임계값(t-test, α=0.05): |5D ρ| ≥ 0.60 / |20D ρ| ≥ 0.44 / |60D ρ| ≥ 0.25 / |120D ρ| ≥ 0.18 (단, 5D는 표본수 작으므로 휴리스틱 임계점 적용)</li>
+<li>윈도우 상관계수 임계값: |5D ρ| ≥ 0.60 / |20D ρ| ≥ 0.44 / |60D ρ| ≥ 0.25 / |120D ρ| ≥ 0.18 (t-test, α=0.05) (단, 5D는 표본수 작으므로 휴리스틱 임계점 적용)</li>
 <li>역사적 충격일 robust z-score: |robust z| ≥ 4.0 (사이드바 설정)</li>
-<li>역사적 충격일 절대하한: |환율| ≥ 2% / |주가| ≥ 5% / |VIX| ≥ 30% / |WTI| ≥ 10% / |GOLD| ≥ 3% / |금리| ≥ 15bp</li>
+<li>역사적 충격일 절대하한: 환율은 |Δ원본|, 주가/원자재는 |로그수익률|, 금리는 |bp| (최근 약 10년간 자산별 99th percentile)</li>
 <hr>
 <li>[KPI 카드] |20D ρ| 기준 1위 변수만 표시. 윈도우 임계값 이상일 때만 표시.</li>
 <li>[롤링 상관계수] 차트에 max(전역 임계값, 윈도우 임계값) 이상인 변수만 표시.</li>
@@ -730,6 +730,7 @@ def main() -> None:
             display_start=start,
             display_end=end,
             z_abs_min=controls["robust_z_min"],
+            raw_aligned_wide=frame.get("raw_aligned_wide"),
         )
         st.caption(f"극단값 감지: {0 if shocks.empty else len(shocks)}개")
         if shocks.empty:
@@ -737,23 +738,30 @@ def main() -> None:
         else:
             change_txt: list[str] = []
             floor_txt: list[str] = []
-            for val, floor, unit in zip(
-                shocks["value"], shocks["abs_threshold"], shocks["unit"]
+            unit_txt: list[str] = []
+            z_floor = float(controls["robust_z_min"])
+            for val, floor, unit, label in zip(
+                shocks["value"],
+                shocks["abs_threshold"],
+                shocks["unit"],
+                shocks["unit_label"],
             ):
                 if unit == "log_return":
-                    change_txt.append(f"{float(val) * 100:.2f}%")
-                    floor_txt.append(f"{float(floor) * 100:.2f}%")
+                    change_txt.append(f"{float(val) * 100:.2f}")
+                    floor_txt.append(f"{float(floor) * 100:.2f}")
                 else:
-                    change_txt.append(f"{float(val):.2f}bp")
-                    floor_txt.append(f"{float(floor):.2f}bp")
+                    change_txt.append(f"{float(val):,.2f}")
+                    floor_txt.append(f"{float(floor):,.2f}")
+                unit_txt.append(str(label))
             show_df = pd.DataFrame(
                 {
                     "날짜": shocks["date"],
                     "시장변수": shocks["display_name"],
-                    "일간변화": change_txt,
+                    "change": change_txt,
+                    "chg_threshold": floor_txt,
+                    "unit": unit_txt,
                     "robust z-score": shocks["robust_z"].astype(float),
-                    "절대하한": floor_txt,
-                    "단위": shocks["unit"],
+                    "z_threshold": z_floor,
                 }
             )
             st.dataframe(
@@ -762,11 +770,14 @@ def main() -> None:
                 hide_index=True,
                 height=TABLE_HEIGHT,
                 column_config={
-                    "일간변화": st.column_config.TextColumn("일간변화", alignment="right"),
+                    "change": st.column_config.TextColumn("change", alignment="right"),
+                    "chg_threshold": st.column_config.TextColumn("chg_threshold", alignment="right"),
                     "robust z-score": st.column_config.NumberColumn(
                         "robust z-score", format="%.2f"
                     ),
-                    "절대하한": st.column_config.TextColumn("절대하한", alignment="right"),
+                    "z_threshold": st.column_config.NumberColumn(
+                        "z_threshold", format="%.2f"
+                    ),
                 },
             )
             st.caption("")

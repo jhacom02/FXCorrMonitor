@@ -385,48 +385,73 @@ def test_detect_historical_shocks_dual_gate_and_display_filter():
     n = ROBUST_Z_WINDOW + 10
     idx = pd.date_range("2015-01-01", periods=n, freq="B")
 
-    # Low-vol history: MAD small → modest moves get large z
+    # Low-vol history: MAD small → modest moves get large z (return-scale KOSPI)
     low_vol = np.full(n, 0.001)
     low_vol[::2] = -0.001
-    dxy_low = low_vol.copy()
-    dxy_low[-3] = 0.08  # z high + above floor → shock
-    dxy_low[-2] = 0.015  # z high but below floor 0.02 → not shock
+    kospi_low = low_vol.copy()
+    kospi_low[-3] = 0.08  # z high + above floor 0.038 → shock
+    kospi_low[-2] = 0.02  # z high but below floor → not shock
 
     # High-vol history: MAD large → 0.05 clears floor but z < 4
     high_vol = np.full(n, 0.02)
     high_vol[::2] = -0.02
-    dxy_high = high_vol.copy()
-    dxy_high[-1] = 0.05  # above floor, z too small
+    kospi_high = high_vol.copy()
+    kospi_high[-1] = 0.05  # above floor, z too small
 
-    hits_low = detect_historical_shocks(pd.DataFrame({"DXY": dxy_low}, index=idx))
+    hits_low = detect_historical_shocks(pd.DataFrame({"KOSPI": kospi_low}, index=idx))
     dates_low = set(hits_low["date"]) if not hits_low.empty else set()
     assert idx[-3].date().isoformat() in dates_low
     assert idx[-2].date().isoformat() not in dates_low
 
-    hits_high = detect_historical_shocks(pd.DataFrame({"DXY": dxy_high}, index=idx))
+    hits_high = detect_historical_shocks(pd.DataFrame({"KOSPI": kospi_high}, index=idx))
     dates_high = set(hits_high["date"]) if not hits_high.empty else set()
     assert idx[-1].date().isoformat() not in dates_high
 
     # F_NET has no floor → never included
     mixed = detect_historical_shocks(
-        pd.DataFrame({"DXY": dxy_low, "F_NET": low_vol}, index=idx)
+        pd.DataFrame({"KOSPI": kospi_low, "F_NET": low_vol}, index=idx)
     )
     assert "F_NET" not in set(mixed["instrument_id"])
 
     filtered = detect_historical_shocks(
-        pd.DataFrame({"DXY": dxy_low}, index=idx),
+        pd.DataFrame({"KOSPI": kospi_low}, index=idx),
         display_start=idx[-5],
         display_end=idx[-1],
     )
     assert idx[-3].date().isoformat() in set(filtered["date"])
     early_only = detect_historical_shocks(
-        pd.DataFrame({"DXY": dxy_low}, index=idx),
+        pd.DataFrame({"KOSPI": kospi_low}, index=idx),
         display_start=idx[-2],
         display_end=idx[-1],
     )
     early_dates = set(early_only["date"]) if not early_only.empty else set()
     assert idx[-3].date().isoformat() not in early_dates
-    assert SHOCK_ABS_FLOOR["DXY"] == 0.02
+    assert SHOCK_ABS_FLOOR["KOSPI"] == 0.038
+    assert SHOCK_ABS_FLOOR["DXY"] == 1.4
+    assert SHOCK_ABS_FLOOR["USDKRW"] == 23.0
+
+
+def test_detect_historical_shocks_abs_scale_uses_raw_diff():
+    from config.thresholds import ROBUST_Z_WINDOW
+    from src.analytics import detect_historical_shocks
+
+    n = ROBUST_Z_WINDOW + 8
+    idx = pd.date_range("2015-01-01", periods=n, freq="B")
+    # Quiet alternating DXY path then one 2.0pt jump (above floor 1.4)
+    deltas = np.full(n - 1, 0.05)
+    deltas[::2] = -0.05
+    deltas[-1] = 2.0
+    prices = np.empty(n)
+    prices[0] = 100.0
+    prices[1:] = 100.0 + np.cumsum(deltas)
+    raw = pd.DataFrame({"DXY": prices}, index=idx)
+    hits = detect_historical_shocks(
+        pd.DataFrame({"KOSPI": np.full(n, 0.001)}, index=idx),
+        raw_aligned_wide=raw,
+    )
+    assert not hits.empty
+    assert "DXY" in set(hits["instrument_id"])
+    assert idx[-1].date().isoformat() in set(hits.loc[hits["instrument_id"] == "DXY", "date"])
 
 
 def test_detect_historical_shocks_respects_z_abs_min():
@@ -435,7 +460,7 @@ def test_detect_historical_shocks_respects_z_abs_min():
 
     n = ROBUST_Z_WINDOW + 5
     idx = pd.date_range("2015-01-01", periods=n, freq="B")
-    # High vol so |x| above FX floor can still land in 3.5–4 |z|
+    # High vol so |x| above KOSPI floor can still land in 3.5–4 |z|
     high_vol = np.full(n, 0.02)
     high_vol[::2] = -0.02
     s = pd.Series(high_vol, index=idx)
@@ -443,7 +468,7 @@ def test_detect_historical_shocks_respects_z_abs_min():
     z_last = float(_robust_z_series(s).iloc[-1])
     assert 3.5 <= abs(z_last) < 4.0
 
-    wide = pd.DataFrame({"DXY": s})
+    wide = pd.DataFrame({"KOSPI": s})
     at_4 = detect_historical_shocks(wide, z_abs_min=4.0)
     at_35 = detect_historical_shocks(wide, z_abs_min=3.5)
     last = idx[-1].date().isoformat()

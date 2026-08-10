@@ -93,11 +93,27 @@ div[data-testid="stSlider"] [data-baseweb="slider"] > div > div {
   color: var(--fx-tag-icon);
 }
 
+/* Keep sidebar expand/collapse; hide the rest of Streamlit chrome. */
 header[data-testid="stHeader"] {
-  display: none;
+  background: transparent !important;
 }
+/* Expand control lives inside stToolbar — do NOT hide the whole toolbar. */
+header[data-testid="stHeader"] [data-testid="stToolbarActions"],
+header[data-testid="stHeader"] [data-testid="stToolbarItems"],
+header[data-testid="stHeader"] [data-testid="stHeaderActionElements"],
+header[data-testid="stHeader"] [data-testid="stStatusWidget"],
+header[data-testid="stHeader"] [data-testid="stAppDeployButton"],
+header[data-testid="stHeader"] [data-testid="stHeaderLogo"],
+header[data-testid="stHeader"] #MainMenu,
 div[data-testid="stDecoration"] {
-  display: none;
+  display: none !important;
+}
+[data-testid="stExpandSidebarButton"],
+[data-testid="stSidebarCollapseButton"] {
+  visibility: visible !important;
+  display: inline-flex !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
 }
 
 .fx-meta-banner {

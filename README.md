@@ -70,6 +70,7 @@ pytest
 | 저장 | SQLite `data/fx_dashboard.db` |
 | 종목 매핑 | [`config/instruments.py`](config/instruments.py) |
 | 유의선·필터 | [`config/thresholds.py`](config/thresholds.py) (예: 5D 0.60 / 20D 0.44 / 60D 0.25 / 120D 0.18) |
+| 충격일 절대하한 | 동일 파일 `SHOCK_ABS_FLOOR` — 자산별 일간변화 99th pct (2015-01-01~2026-08-07) |
 
 파생 수익률·상관계수는 DB에 넣지 않고, 대시보드 조회 시 계산합니다.
 
