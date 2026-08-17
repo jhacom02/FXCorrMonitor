@@ -17,6 +17,7 @@ Thumbs.db
 *.log
 .env
 data/.infomax_daily.lock
+~$*.xlsx
 .idea/
 .vscode/
 FXCorrMonitor_doc.md
