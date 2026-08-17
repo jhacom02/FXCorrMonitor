@@ -10,7 +10,14 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from infomax.snapshot_daily import MAPPING, cells_to_rows, lookback_dates, parse_number
+from infomax.snapshot_daily import (
+    MAPPING,
+    USDKRW_CELL,
+    _read_cell,
+    cells_to_rows,
+    lookback_dates,
+    parse_number,
+)
 
 
 def test_parse_number_keeps_zero_rejects_errors():
@@ -18,8 +25,41 @@ def test_parse_number_keeps_zero_rejects_errors():
     assert parse_number(None) is None
     assert parse_number("#N/A") is None
     assert parse_number("-") is None
+    assert parse_number("        ") is None
+    assert parse_number("1,416.10") == 1416.10
     # Excel COM CVErr for #N/A
     assert parse_number(-2146826259) is None
+
+
+class _FakeRange:
+    def __init__(self, value2=None, value=None, text=None):
+        self.Value2 = value2
+        self.Value = value if value is not None else value2
+        self.Text = text if text is not None else str(value if value is not None else value2 or "")
+
+
+class _FakeSheet:
+    def __init__(self, cells: dict[str, _FakeRange]):
+        self._cells = cells
+
+    def Range(self, addr: str) -> _FakeRange:
+        return self._cells[addr]
+
+
+def test_read_cell_prefers_value2_and_text():
+    ws = _FakeSheet(
+        {
+            "D3": _FakeRange(value2=1416.1, value="        ", text="1,416.10"),
+            "E4": _FakeRange(value2=None, value="...", text="..."),
+        }
+    )
+    assert _read_cell(ws, "D3") == 1416.1
+    assert parse_number(_read_cell(ws, "E4")) is None
+
+
+def test_usdkrw_cell_constant():
+    assert USDKRW_CELL == "D3"
+    assert MAPPING[0] == ("D3", "USDKRW")
 
 
 def test_lookback_excludes_today():

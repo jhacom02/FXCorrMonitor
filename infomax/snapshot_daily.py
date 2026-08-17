@@ -47,7 +47,10 @@ MAPPING: list[tuple[str, str]] = [
 ]
 DEFAULT_EXCEL = "data/raw/infomax_raw_snapshot.xlsx"
 SHEET, DATE_CELL = "Sheet1", "B1"
+USDKRW_CELL, USDKRW_FALLBACK_CELL = "D3", "E3"
+USDKRW_FALLBACK_FORMULA = "=_xll.IMDP($B3,$C3,E$2,$B$1)"
 LOOKBACK_DAYS, REFRESH_TIMEOUT, POLL_INTERVAL = 7, 30.0, 0.5
+USDKRW_FALLBACK_WAIT = 15.0
 XL_DONE, XL_AUTO = 0, -4105
 ADDIN_RELOAD_PAUSE = 1.0
 _INFOMAX_ADDIN_KEYWORDS = ("infomax", "인포맥스")
@@ -59,6 +62,28 @@ def lookback_dates(n: int = LOOKBACK_DAYS, *, today: date | None = None) -> list
     anchor = today or date.today()
     end = date.fromordinal(anchor.toordinal() - 1)
     return [date.fromordinal(end.toordinal() - (n - 1 - i)) for i in range(n)]
+
+
+def _read_cell(ws: Any, cell: str) -> Any:
+    """Read Excel cell; prefer Value2 (raw) over formatted Value/Text."""
+    rng = ws.Range(cell)
+    for attr in ("Value2", "Value"):
+        try:
+            raw = getattr(rng, attr)
+            if parse_number(raw) is not None:
+                return raw
+        except Exception:
+            pass
+    try:
+        text = rng.Text
+        if parse_number(text) is not None:
+            return text
+    except Exception:
+        pass
+    try:
+        return rng.Value
+    except Exception:
+        return None
 
 
 def parse_number(value: Any) -> float | None:
@@ -241,6 +266,12 @@ def _refresh(excel, wb, ws, query_date: date) -> None:
     _wait_for_data_refresh(excel, min(5.0, REFRESH_TIMEOUT))
 
 
+def _cell_busy(value: Any) -> bool:
+    return isinstance(value, str) and (
+        "BUSY" in value.upper() or "GETTING" in value.upper()
+    )
+
+
 def _wait_ready(excel, ws) -> bool:
     cells = [c for c, _ in MAPPING]
     deadline = time.monotonic() + REFRESH_TIMEOUT
@@ -250,15 +281,57 @@ def _wait_ready(excel, ws) -> bool:
         except Exception:
             state = XL_DONE
         if state == XL_DONE:
-            vals = [ws.Range(c).Value for c in cells]
+            vals = [_read_cell(ws, c) for c in cells]
+            anchor = parse_number(_read_cell(ws, USDKRW_CELL))
+            if anchor is None:
+                time.sleep(POLL_INTERVAL)
+                continue
             if any(parse_number(v) is not None for v in vals) and not any(
-                isinstance(v, str) and ("BUSY" in v.upper() or "GETTING" in v.upper())
-                for v in vals
-                if v is not None
+                _cell_busy(v) for v in vals if v is not None
             ):
                 return True
         time.sleep(POLL_INTERVAL)
     return False
+
+
+def _fetch_usdkrw(ws: Any, excel: Any) -> Any:
+    """USDKRW from D3 (현재가); fallback to E3 (KR_MID_Close) when D3 is blank."""
+    primary = _read_cell(ws, USDKRW_CELL)
+    if parse_number(primary) is not None:
+        return primary
+
+    logger.warning("USDKRW@%s empty; trying KR_MID_Close via %s", USDKRW_CELL, USDKRW_FALLBACK_CELL)
+    fallback_rng = ws.Range(USDKRW_FALLBACK_CELL)
+    old_formula = ""
+    try:
+        old_formula = str(fallback_rng.Formula or "")
+    except Exception:
+        pass
+
+    try:
+        fallback_rng.Formula = USDKRW_FALLBACK_FORMULA
+        try:
+            excel.CalculateFull()
+        except Exception:
+            pass
+        _wait_for_data_refresh(excel, USDKRW_FALLBACK_WAIT)
+        deadline = time.monotonic() + USDKRW_FALLBACK_WAIT
+        while time.monotonic() < deadline:
+            value = _read_cell(ws, USDKRW_FALLBACK_CELL)
+            if parse_number(value) is not None:
+                logger.info("USDKRW via %s fallback: %r", USDKRW_FALLBACK_CELL, value)
+                return value
+            time.sleep(POLL_INTERVAL)
+    finally:
+        try:
+            if old_formula.startswith("="):
+                fallback_rng.Formula = old_formula
+            else:
+                fallback_rng.Value = "-"
+        except Exception:
+            pass
+
+    return _read_cell(ws, USDKRW_CELL)
 
 
 @contextmanager
@@ -300,7 +373,9 @@ def _fetch_day(excel, wb, ws, qd: date) -> dict[str, Any]:
         logger.warning("Timeout; retry %s", qd)
         _refresh(excel, wb, ws, qd)
         _wait_ready(excel, ws)
-    return {cell: ws.Range(cell).Value for cell, _ in MAPPING}
+    values = {cell: _read_cell(ws, cell) for cell, _ in MAPPING}
+    values[USDKRW_CELL] = _fetch_usdkrw(ws, excel)
+    return values
 
 
 def run_etl(
@@ -337,6 +412,9 @@ def run_etl(
                         logger.info("skip: %s", s)
                     logger.info("%s: %d/%d loaded", qd.isoformat(), len(rows), len(MAPPING))
                     if not rows:
+                        continue
+                    if not any(r["instrument_id"] == "USDKRW" for r in rows):
+                        logger.error("%s: USDKRW missing — day skipped", qd.isoformat())
                         continue
                     if dry_run:
                         for r in rows:
@@ -381,7 +459,8 @@ def run_poc(excel_path: Path, date_a: date, date_b: date, *, visible: bool = Tru
             snaps = {}
             for qd in (date_a, date_b):
                 _fetch_day(excel, wb, ws, qd)
-                snaps[qd] = {c: ws.Range(c).Value for c in sample}
+                snaps[qd] = {c: _read_cell(ws, c) for c in sample}
+                snaps[qd][USDKRW_CELL] = _fetch_usdkrw(ws, excel)
                 print(f"\n=== {qd.isoformat()} ===")
                 for c, v in snaps[qd].items():
                     print(f"  {c}: {v!r}")
