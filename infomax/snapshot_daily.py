@@ -272,35 +272,18 @@ def _cell_busy(value: Any) -> bool:
     )
 
 
-def _wait_ready(excel, ws) -> bool:
-    cells = [c for c, _ in MAPPING]
-    deadline = time.monotonic() + REFRESH_TIMEOUT
-    while time.monotonic() < deadline:
-        try:
-            state = int(excel.CalculationState)
-        except Exception:
-            state = XL_DONE
-        if state == XL_DONE:
-            vals = [_read_cell(ws, c) for c in cells]
-            anchor = parse_number(_read_cell(ws, USDKRW_CELL))
-            if anchor is None:
-                time.sleep(POLL_INTERVAL)
-                continue
-            if any(parse_number(v) is not None for v in vals) and not any(
-                _cell_busy(v) for v in vals if v is not None
-            ):
-                return True
-        time.sleep(POLL_INTERVAL)
-    return False
+def _usdkrw_ready(ws: Any) -> bool:
+    if parse_number(_read_cell(ws, USDKRW_CELL)) is not None:
+        return True
+    return parse_number(_read_cell(ws, USDKRW_FALLBACK_CELL)) is not None
 
 
 def _fetch_usdkrw(ws: Any, excel: Any) -> Any:
-    """USDKRW from D3 (현재가); fallback to E3 (KR_MID_Close) when D3 is blank."""
+    """USDKRW from D3 (현재가); fallback to E3 (KR_MID_Close) via COM when D3 is blank."""
     primary = _read_cell(ws, USDKRW_CELL)
     if parse_number(primary) is not None:
         return primary
 
-    logger.warning("USDKRW@%s empty; trying KR_MID_Close via %s", USDKRW_CELL, USDKRW_FALLBACK_CELL)
     fallback_rng = ws.Range(USDKRW_FALLBACK_CELL)
     old_formula = ""
     try:
@@ -308,6 +291,7 @@ def _fetch_usdkrw(ws: Any, excel: Any) -> Any:
     except Exception:
         pass
 
+    logger.warning("USDKRW@%s empty; trying KR_MID_Close via %s", USDKRW_CELL, USDKRW_FALLBACK_CELL)
     try:
         fallback_rng.Formula = USDKRW_FALLBACK_FORMULA
         try:
@@ -332,6 +316,27 @@ def _fetch_usdkrw(ws: Any, excel: Any) -> Any:
             pass
 
     return _read_cell(ws, USDKRW_CELL)
+
+
+def _wait_ready(excel, ws) -> bool:
+    cells = [c for c, _ in MAPPING]
+    deadline = time.monotonic() + REFRESH_TIMEOUT
+    while time.monotonic() < deadline:
+        try:
+            state = int(excel.CalculationState)
+        except Exception:
+            state = XL_DONE
+        if state == XL_DONE:
+            vals = [_read_cell(ws, c) for c in cells]
+            if not _usdkrw_ready(ws):
+                time.sleep(POLL_INTERVAL)
+                continue
+            if any(parse_number(v) is not None for v in vals) and not any(
+                _cell_busy(v) for v in vals if v is not None
+            ):
+                return True
+        time.sleep(POLL_INTERVAL)
+    return False
 
 
 @contextmanager
@@ -388,6 +393,11 @@ def run_etl(
 ) -> int:
     if not excel_path.exists():
         logger.error("Excel missing: %s", excel_path)
+        return 1
+
+    dates = [d for d in dates if d.weekday() < 5]
+    if not dates:
+        logger.error("No weekday dates to process")
         return 1
 
     ingestion_id = None

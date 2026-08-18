@@ -72,6 +72,7 @@ def apply_as_of_cutoff(
         raise ValueError("USD/KRW 데이터가 없습니다.")
 
     usd = sanitize_series(raw_wide[TARGET_ID]).dropna()
+    usd = usd[usd.index.weekday < 5]
     if usd.empty:
         raise ValueError("USD/KRW 유효 관측치가 없습니다.")
 
@@ -162,6 +163,7 @@ def align_transformed(
         }
 
     seoul_dates = clipped.index[clipped[TARGET_ID].notna()]
+    seoul_dates = seoul_dates[seoul_dates.weekday < 5]
     if seoul_dates.empty:
         raise ValueError("USD/KRW 유효 거래일이 없습니다.")
 

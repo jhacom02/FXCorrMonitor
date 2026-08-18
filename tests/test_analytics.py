@@ -260,11 +260,19 @@ def test_snap_to_prior_session_weekend():
     from src.utils import snap_to_prior_session
 
     sessions = pd.DatetimeIndex(["2024-06-03", "2024-06-04", "2024-06-05", "2024-06-07"])
-    # Saturday → prior Friday
     assert snap_to_prior_session("2024-06-08", sessions) == pd.Timestamp("2024-06-07")
     assert snap_to_prior_session("2024-06-05", sessions) == pd.Timestamp("2024-06-05")
     with pytest.raises(ValueError):
         snap_to_prior_session("2024-06-01", sessions)
+
+
+def test_snap_to_prior_session_weekend_rows_in_db():
+    from src.utils import snap_to_prior_session
+
+    sessions = pd.DatetimeIndex(["2026-08-14", "2026-08-15", "2026-08-16"])
+    assert snap_to_prior_session("2026-08-15", sessions) == pd.Timestamp("2026-08-14")
+    assert snap_to_prior_session("2026-08-16", sessions) == pd.Timestamp("2026-08-14")
+    assert snap_to_prior_session("2026-08-14", sessions) == pd.Timestamp("2026-08-14")
 
 
 def test_prior_confirmed_session_excludes_today():

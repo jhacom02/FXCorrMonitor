@@ -141,6 +141,23 @@ def test_previous_us_close_no_future_leak():
     assert v2 == 4000.0
 
 
+def test_seoul_dates_exclude_weekend_usdkrw():
+    idx = pd.to_datetime(["2026-08-14", "2026-08-15", "2026-08-16"])
+    wide = pd.DataFrame(
+        {
+            TARGET_ID: [1410.0, 1410.0, 1410.0],
+            "DXY": [99.0, 99.0, 99.0],
+        },
+        index=idx,
+    )
+    instruments = [INSTRUMENT_BY_ID[TARGET_ID], INSTRUMENT_BY_ID["DXY"]]
+    result = align_transformed(wide, instruments=instruments)
+    seoul = result["seoul_dates"]
+    assert pd.Timestamp("2026-08-14") in seoul
+    assert pd.Timestamp("2026-08-15") not in seoul
+    assert pd.Timestamp("2026-08-16") not in seoul
+
+
 def test_active_false_excluded_from_default_analysis(monkeypatch):
     from config import instruments as inst_mod
     from config.instruments import Instrument, get_active_instruments, get_driver_instruments

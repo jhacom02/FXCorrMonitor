@@ -212,6 +212,13 @@ def lookback_range(
     return start, end
 
 
+def weekday_sessions(
+    sessions: pd.DatetimeIndex | pd.Series | list | tuple,
+) -> pd.DatetimeIndex:
+    idx = pd.DatetimeIndex(pd.to_datetime(sessions)).normalize().unique().sort_values()
+    return idx[idx.weekday < 5]
+
+
 def snap_to_prior_session(
     selected: date | datetime | pd.Timestamp | str,
     sessions: pd.DatetimeIndex | pd.Series | list | tuple,
@@ -221,7 +228,7 @@ def snap_to_prior_session(
     Raises ``ValueError`` if no session is on or before the selected date.
     """
     selected_ts = pd.Timestamp(selected).normalize()
-    idx = pd.DatetimeIndex(pd.to_datetime(sessions)).normalize().unique().sort_values()
+    idx = weekday_sessions(sessions)
     if len(idx) == 0:
         raise ValueError("유효한 거래일 목록이 없습니다.")
     prior = idx[idx <= selected_ts]
@@ -236,7 +243,7 @@ def prior_confirmed_session(
     run_date: date | datetime | pd.Timestamp | None = None,
 ) -> pd.Timestamp:
     today = pd.Timestamp(run_date or date.today()).normalize()
-    idx = pd.DatetimeIndex(pd.to_datetime(sessions)).normalize().unique().sort_values()
+    idx = weekday_sessions(sessions)
     if len(idx) == 0:
         raise ValueError("유효한 거래일 목록이 없습니다.")
     prior = idx[idx < today]

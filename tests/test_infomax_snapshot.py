@@ -46,7 +46,7 @@ class _FakeSheet:
         return self._cells[addr]
 
 
-def test_read_cell_prefers_value2_and_text():
+def test_read_cell_prefers_value2_over_formatted_blank():
     ws = _FakeSheet(
         {
             "D3": _FakeRange(value2=1416.1, value="        ", text="1,416.10"),
