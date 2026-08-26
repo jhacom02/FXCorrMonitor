@@ -1,7 +1,4 @@
-"""Infomax IMDP Snapshot daily ETL: B1 → refresh → read 16 cells → UPSERT.
-
-Sibling of src/. Does not change Historical IMDH ingestion.
-"""
+"""Infomax IMDP Snapshot daily ETL: B1 → refresh → read 16 cells → UPSERT."""
 
 from __future__ import annotations
 
@@ -65,7 +62,6 @@ def lookback_dates(n: int = LOOKBACK_DAYS, *, today: date | None = None) -> list
 
 
 def _read_cell(ws: Any, cell: str) -> Any:
-    """Read Excel cell; prefer Value2 (raw) over formatted Value/Text."""
     rng = ws.Range(cell)
     for attr in ("Value2", "Value"):
         try:
@@ -186,7 +182,6 @@ def _is_infomax_addin(addin: Any) -> bool:
 
 
 def _enable_infomax_addins(app: Any) -> None:
-    """Ensure Infomax XLL add-ins are marked Installed (SendMessageRPA pattern)."""
     try:
         for index in range(1, app.AddIns.Count + 1):
             addin = app.AddIns.Item(index)
@@ -198,7 +193,6 @@ def _enable_infomax_addins(app: Any) -> None:
 
 
 def _reload_installed_addins(app: Any) -> None:
-    """Toggle Installed to force XLL load under COM automation."""
     reloaded = 0
     try:
         for index in range(1, app.AddIns.Count + 1):
@@ -283,28 +277,20 @@ def _cell_busy(value: Any) -> bool:
     )
 
 
-def _usdkrw_ready(ws: Any) -> bool:
-    if parse_number(_read_cell(ws, USDKRW_CELL)) is not None:
-        return True
-    return parse_number(_read_cell(ws, USDKRW_FALLBACK_CELL)) is not None
-
-
 def select_usdkrw_raw(primary: Any, fallback: Any) -> Any:
-    if parse_number(primary) is not None:
-        return primary
     if parse_number(fallback) is not None:
         return fallback
+    if parse_number(primary) is not None:
+        return primary
     return primary
 
 
 def _fetch_usdkrw(ws: Any, excel: Any) -> Any:
-    """USDKRW from D3 (현재가); fallback to E3 (KR_MID_Close) when D3 is blank."""
     primary = _read_cell(ws, USDKRW_CELL)
     fallback = _read_cell(ws, USDKRW_FALLBACK_CELL)
     chosen = select_usdkrw_raw(primary, fallback)
     if parse_number(chosen) is not None:
-        if parse_number(primary) is None:
-            logger.info("USDKRW via %s fallback: %r", USDKRW_FALLBACK_CELL, chosen)
+        logger.info("USDKRW via %s: %r", USDKRW_FALLBACK_CELL if parse_number(fallback) is not None else USDKRW_CELL, chosen)
         return chosen
 
     logger.warning("USDKRW@%s empty; trying KR_MID_Close via %s", USDKRW_CELL, USDKRW_FALLBACK_CELL)
@@ -324,13 +310,18 @@ def _fetch_usdkrw(ws: Any, excel: Any) -> Any:
         while time.monotonic() < deadline:
             value = _read_cell(ws, USDKRW_FALLBACK_CELL)
             if parse_number(value) is not None:
-                logger.info("USDKRW via %s fallback: %r", USDKRW_FALLBACK_CELL, value)
+                logger.info("USDKRW via %s: %r", USDKRW_FALLBACK_CELL, value)
                 return value
             time.sleep(POLL_INTERVAL)
     except Exception:
         pass
 
-    return _read_cell(ws, USDKRW_CELL)
+    chosen = select_usdkrw_raw(
+        _read_cell(ws, USDKRW_CELL), _read_cell(ws, USDKRW_FALLBACK_CELL)
+    )
+    if parse_number(chosen) is not None:
+        logger.info("USDKRW via %s: %r", USDKRW_CELL, chosen)
+    return chosen
 
 
 def _wait_ready(excel, ws) -> bool:
@@ -343,9 +334,6 @@ def _wait_ready(excel, ws) -> bool:
             state = XL_DONE
         if state == XL_DONE:
             vals = [_read_cell(ws, c) for c in cells]
-            if not _usdkrw_ready(ws):
-                time.sleep(POLL_INTERVAL)
-                continue
             if any(parse_number(v) is not None for v in vals) and not any(
                 _cell_busy(v) for v in vals if v is not None
             ):

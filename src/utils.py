@@ -240,10 +240,6 @@ def snap_to_prior_session(
     selected: date | datetime | pd.Timestamp | str,
     sessions: pd.DatetimeIndex | pd.Series | list | tuple,
 ) -> pd.Timestamp:
-    """Return the latest session date on or before ``selected``.
-
-    Raises ``ValueError`` if no session is on or before the selected date.
-    """
     selected_ts = pd.Timestamp(selected).normalize()
     idx = weekday_sessions(sessions)
     if len(idx) == 0:

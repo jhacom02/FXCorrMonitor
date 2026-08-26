@@ -20,4 +20,5 @@ data/.infomax_daily.lock
 ~$*.xlsx
 .idea/
 .vscode/
+data/raw/
 FXCorrMonitor_doc.md

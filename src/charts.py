@@ -898,7 +898,6 @@ def rebase_series_to_100(
     start: pd.Timestamp,
     base_date: pd.Timestamp | None = None,
 ) -> pd.Series:
-    """Rebase levels so the value on analysis start (or base_date) equals 100."""
     if series is None or series.empty:
         return pd.Series(dtype=float)
     s = series.dropna().sort_index()

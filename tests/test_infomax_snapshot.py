@@ -69,8 +69,9 @@ def test_usdkrw_cell_constant():
 
 
 def test_select_usdkrw_raw_uses_mid_when_spot_blank():
-    assert select_usdkrw_raw(1416.1, 1415.0) == 1416.1
+    assert select_usdkrw_raw(1416.1, 1415.0) == 1415.0
     assert select_usdkrw_raw("        ", 1415.0) == 1415.0
+    assert select_usdkrw_raw(1384.3, "-") == 1384.3
     assert parse_number(select_usdkrw_raw("        ", "-")) is None
 
 
@@ -96,7 +97,7 @@ def test_fetch_usdkrw_uses_existing_e3_without_recalc():
 
     ws = _FakeSheet(
         {
-            "D3": _FakeRange(value2="        ", value="        ", text="        "),
+            "D3": _FakeRange(value2=1384.3, value=1384.3, text="1,384.30"),
             "E3": _FakeRange(value2=1415.0, value=1415.0, text="1,415.00"),
         }
     )
