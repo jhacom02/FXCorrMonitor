@@ -212,6 +212,23 @@ def lookback_range(
     return start, end
 
 
+def pad_session_start(
+    sessions: pd.DatetimeIndex | pd.Series | list | tuple,
+    start: date | datetime | pd.Timestamp | str,
+    pad: int,
+) -> pd.Timestamp:
+    start_ts = pd.Timestamp(start).normalize()
+    idx = weekday_sessions(sessions)
+    if len(idx) == 0 or pad <= 0:
+        return start_ts
+    before = idx[idx < start_ts]
+    if len(before) == 0:
+        return start_ts
+    if len(before) <= pad:
+        return pd.Timestamp(before[0]).normalize()
+    return pd.Timestamp(before[-pad]).normalize()
+
+
 def weekday_sessions(
     sessions: pd.DatetimeIndex | pd.Series | list | tuple,
 ) -> pd.DatetimeIndex:

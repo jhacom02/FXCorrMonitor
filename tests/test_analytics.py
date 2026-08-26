@@ -306,6 +306,41 @@ def test_lookback_from_snapped_as_of():
     assert start == pd.Timestamp("2023-06-14")
 
 
+def test_pad_session_start_uses_prior_weekdays():
+    from src.utils import pad_session_start
+
+    sessions = pd.DatetimeIndex(pd.bdate_range("2024-01-02", "2024-06-28"))
+    start = pd.Timestamp("2024-06-03")
+    padded = pad_session_start(sessions, start, 5)
+    before = sessions[sessions < start]
+    assert padded == pd.Timestamp(before[-5]).normalize()
+    early = pad_session_start(sessions, sessions[3], 20)
+    assert early == pd.Timestamp(sessions[0]).normalize()
+    assert pad_session_start(sessions, start, 0) == start
+
+
+def test_padded_rolling_valid_at_display_start():
+    from src.utils import pad_session_start
+
+    idx = pd.DatetimeIndex(pd.bdate_range("2023-01-02", "2024-06-28"))
+    rng = np.random.default_rng(0)
+    df = pd.DataFrame(
+        {"USDKRW": rng.normal(size=len(idx)), "DXY": rng.normal(size=len(idx))},
+        index=idx,
+    )
+    start = pd.Timestamp("2024-01-02")
+    end = pd.Timestamp("2024-06-28")
+    compute_start = pad_session_start(df.index, start, 120)
+    padded = df.loc[(df.index >= compute_start) & (df.index <= end)]
+    sliced = df.loc[(df.index >= start) & (df.index <= end)]
+    corr_pad = calculate_rolling_correlations(padded, drivers=["DXY"], window=120)
+    corr_cut = calculate_rolling_correlations(sliced, drivers=["DXY"], window=120)
+    at_pad = corr_pad.loc[corr_pad["date"] == start, "rolling_correlation"]
+    at_cut = corr_cut.loc[corr_cut["date"] == start, "rolling_correlation"]
+    assert len(at_pad) and at_pad.notna().all()
+    assert len(at_cut) and at_cut.isna().all()
+
+
 def test_regimes_for_window_smoke():
     from src.analytics import regimes_for_window
 

@@ -49,6 +49,7 @@ from src.utils import (
     format_fx,
     format_lookback_period,
     lookback_range,
+    pad_session_start,
     prior_confirmed_session,
     setup_logging,
     snap_to_prior_session,
@@ -359,9 +360,14 @@ def main() -> None:
 
         start, end = lookback_range(as_of, controls["period_key"])
 
-        transformed = frame["transformed_wide"]
+        transformed_full = frame["transformed_wide"]
         raw_full = frame["raw_aligned_wide"]
-        transformed = transformed.loc[(transformed.index >= start) & (transformed.index <= end)]
+        compute_start = pad_session_start(
+            transformed_full.index, start, max(ANALYSIS_WINDOWS)
+        )
+        transformed = transformed_full.loc[
+            (transformed_full.index >= compute_start) & (transformed_full.index <= end)
+        ]
         raw_aligned = raw_full.loc[(raw_full.index >= start) & (raw_full.index <= end)]
 
         selected_drivers = [i for i in controls["selected_ids"] if i in transformed.columns]
@@ -463,7 +469,7 @@ def main() -> None:
 
         if len(transformed) < chart_window:
             st.warning(
-                f"선택 기간({len(transformed)}거래일)이 롤링 윈도우({chart_window}일)보다 짧습니다. "
+                f"선행 데이터({len(transformed)}거래일)가 롤링 윈도우({chart_window}일)보다 짧습니다. "
                 "분석 기간을 늘리거나 윈도우를 줄이세요."
             )
             chart_corr = pd.DataFrame()
@@ -487,6 +493,10 @@ def main() -> None:
                         drivers=chart_selected,
                         window=chart_window,
                     )
+            chart_corr = chart_corr.loc[
+                (pd.to_datetime(chart_corr["date"]) >= start)
+                & (pd.to_datetime(chart_corr["date"]) <= end)
+            ]
             fig, chart_info = rolling_correlation_chart(
                 chart_corr,
                 selected_instruments=selected_drivers,
@@ -694,7 +704,12 @@ def main() -> None:
                 elif int(r["window"]) == 120:
                     m120 = r["rolling_correlation"]
 
-            corr_s = corr_20[corr_20["instrument_id"] == pick].set_index("date")["rolling_correlation"].dropna()
+            corr_s = corr_20[corr_20["instrument_id"] == pick]
+            corr_s = corr_s.loc[
+                (pd.to_datetime(corr_s["date"]) >= start)
+                & (pd.to_datetime(corr_s["date"]) <= end)
+            ]
+            corr_s = corr_s.set_index("date")["rolling_correlation"].dropna()
             min_idx = corr_s.idxmin() if len(corr_s) else None
             max_idx = corr_s.idxmax() if len(corr_s) else None
             avg_rho = format_corr(float(corr_s.mean()) if len(corr_s) else np.nan)
