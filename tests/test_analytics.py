@@ -182,6 +182,25 @@ def test_latest_top_driver_no_mixed():
     assert low["driver_id"] == DRIVER_NONE
 
 
+def test_latest_top_driver_uses_as_of_date():
+    dates = pd.date_range("2024-06-03", periods=3, freq="B")
+    rows = []
+    for d, rho in zip(dates, (0.20, 0.55, 0.90)):
+        rows.append(
+            {
+                "date": d,
+                "instrument_id": "DXY",
+                "display_name": "DXY",
+                "rolling_correlation": rho,
+                "abs_correlation": rho,
+            }
+        )
+    top = latest_top_driver(pd.DataFrame(rows), sig_abs(20), as_of_date=dates[1])
+    assert abs(top["signed_correlation"] - 0.55) < 1e-9
+    latest = latest_top_driver(pd.DataFrame(rows), sig_abs(20))
+    assert abs(latest["signed_correlation"] - 0.90) < 1e-9
+
+
 def test_compress_regimes():
     dates = pd.date_range("2024-06-01", periods=6, freq="B")
     daily = pd.DataFrame(

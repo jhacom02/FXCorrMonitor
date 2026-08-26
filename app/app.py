@@ -381,7 +381,7 @@ def main() -> None:
             drivers=selected_drivers,
             window=20,
         )
-        snap = latest_top_driver(corr_20, sig_abs(20))
+        snap = latest_top_driver(corr_20, sig_abs(20), as_of_date=as_of)
         driver_id = snap.get("driver_id")
 
         heatmap_drivers = list(selected_drivers)
@@ -393,18 +393,29 @@ def main() -> None:
             transformed,
             drivers=heatmap_drivers,
             windows=list(ANALYSIS_WINDOWS),
-            as_of_date=transformed.index.max() if len(transformed) else as_of,
+            as_of_date=as_of,
         )
 
         display_ids = list(selected_drivers)
 
-        # --- KPI ---
-        usd_raw = raw_aligned[TARGET_ID].dropna() if TARGET_ID in raw_aligned.columns else pd.Series(dtype=float)
-        latest_fx = float(usd_raw.iloc[-1]) if len(usd_raw) else np.nan
-        if len(usd_raw) >= 2:
-            latest_chg = float(usd_raw.iloc[-1]) - float(usd_raw.iloc[-2])
-        else:
+        usd_all = pd.Series(dtype=float)
+        if TARGET_ID in raw_full.columns:
+            usd_all = pd.to_numeric(raw_full[TARGET_ID], errors="coerce").dropna()
+            usd_all.index = pd.DatetimeIndex(pd.to_datetime(usd_all.index)).normalize()
+        as_of_ts = pd.Timestamp(as_of).normalize()
+        usd_at = usd_all[usd_all.index == as_of_ts]
+        if usd_at.empty:
+            usd_at = usd_all[usd_all.index <= as_of_ts]
+        if usd_at.empty:
+            latest_fx = np.nan
             latest_chg = np.nan
+        else:
+            fx_date = pd.Timestamp(usd_at.index[-1]).normalize()
+            latest_fx = float(usd_at.iloc[-1])
+            usd_prev = usd_all[usd_all.index < fx_date]
+            latest_chg = (
+                latest_fx - float(usd_prev.iloc[-1]) if len(usd_prev) else np.nan
+            )
 
         rho_txt = _signed_rho_text(snap.get("signed_correlation"))
         if pd.isna(latest_chg):
@@ -481,7 +492,7 @@ def main() -> None:
                 drivers=selected_drivers,
                 window=chart_window,
             )
-            chart_top = latest_top_driver(chart_corr, sig_abs(chart_window))
+            chart_top = latest_top_driver(chart_corr, sig_abs(chart_window), as_of_date=as_of)
             chart_driver_id = chart_top.get("driver_id")
             chart_selected = list(selected_drivers)
             if chart_driver_id and chart_driver_id not in (DRIVER_NONE, DRIVER_MIXED):
@@ -605,7 +616,7 @@ def main() -> None:
         st.markdown('<div class="fx-section-title">주도변수 타임라인</div>', unsafe_allow_html=True)
         st.caption("단독주도는 고유색, 혼합은 앰버색, 없음이거나 평균 |ρ|가 임계점 미만이면 회색으로 표시합니다.")
         x_range = [start, end + pd.Timedelta(days=1)]
-        as_of_tl = transformed.index.max()
+        as_of_tl = pd.Timestamp(as_of).normalize()
         timeline_regimes: list[tuple[str, pd.DataFrame]] = []
         for w, label in zip(ANALYSIS_WINDOWS, ("5D", "20D", "60D", "120D")):
             timeline_regimes.append(
@@ -691,7 +702,7 @@ def main() -> None:
                     transformed,
                     drivers=[pick],
                     windows=list(ANALYSIS_WINDOWS),
-                    as_of_date=transformed.index.max(),
+                    as_of_date=as_of,
                 )
             m5 = m20 = m60 = m120 = np.nan
             for _, r in pick_multi.iterrows():

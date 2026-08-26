@@ -210,7 +210,11 @@ def assign_daily_drivers(
     return pd.DataFrame(records).sort_values("date").reset_index(drop=True)
 
 
-def latest_top_driver(corr_long: pd.DataFrame, min_abs: float) -> dict[str, Any]:
+def latest_top_driver(
+    corr_long: pd.DataFrame,
+    min_abs: float,
+    as_of_date: pd.Timestamp | None = None,
+) -> dict[str, Any]:
     empty = {
         "driver_id": DRIVER_NONE,
         "driver_name": DRIVER_NONE_NAME,
@@ -221,8 +225,12 @@ def latest_top_driver(corr_long: pd.DataFrame, min_abs: float) -> dict[str, Any]
         return empty
 
     df = corr_long.copy()
-    df["date"] = pd.to_datetime(df["date"])
-    as_of = df["date"].max()
+    df["date"] = pd.to_datetime(df["date"]).dt.normalize()
+    as_of = (
+        pd.Timestamp(as_of_date).normalize()
+        if as_of_date is not None
+        else df["date"].max()
+    )
     snap = df[df["date"] == as_of].dropna(subset=["abs_correlation"])
     if snap.empty:
         return empty
