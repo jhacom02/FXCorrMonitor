@@ -66,8 +66,6 @@ scripts\run_infomax_daily.bat
 pytest
 ```
 
-상세: [`FXCorrMonitor_doc.md`](FXCorrMonitor_doc.md)
-
 ## 데이터·설정
 
 | 항목 | 설명 |
