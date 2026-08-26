@@ -13,10 +13,13 @@ if str(ROOT) not in sys.path:
 from infomax.snapshot_daily import (
     MAPPING,
     USDKRW_CELL,
+    USDKRW_FALLBACK_CELL,
+    USDKRW_FALLBACK_FORMULA,
     _read_cell,
     cells_to_rows,
     lookback_dates,
     parse_number,
+    select_usdkrw_raw,
 )
 
 
@@ -32,10 +35,11 @@ def test_parse_number_keeps_zero_rejects_errors():
 
 
 class _FakeRange:
-    def __init__(self, value2=None, value=None, text=None):
+    def __init__(self, value2=None, value=None, text=None, formula=""):
         self.Value2 = value2
         self.Value = value if value is not None else value2
         self.Text = text if text is not None else str(value if value is not None else value2 or "")
+        self.Formula = formula
 
 
 class _FakeSheet:
@@ -59,7 +63,44 @@ def test_read_cell_prefers_value2_over_formatted_blank():
 
 def test_usdkrw_cell_constant():
     assert USDKRW_CELL == "D3"
+    assert USDKRW_FALLBACK_CELL == "E3"
     assert MAPPING[0] == ("D3", "USDKRW")
+    assert USDKRW_FALLBACK_FORMULA.startswith("=_xll.IMDP(")
+
+
+def test_select_usdkrw_raw_uses_mid_when_spot_blank():
+    assert select_usdkrw_raw(1416.1, 1415.0) == 1416.1
+    assert select_usdkrw_raw("        ", 1415.0) == 1415.0
+    assert parse_number(select_usdkrw_raw("        ", "-")) is None
+
+
+def test_ensure_usdkrw_mid_formula_writes_e3():
+    from infomax.snapshot_daily import _ensure_usdkrw_mid_formula
+
+    e3 = _FakeRange(value2="-", formula="-")
+    ws = _FakeSheet({"E3": e3})
+    _ensure_usdkrw_mid_formula(ws)
+    assert e3.Formula == USDKRW_FALLBACK_FORMULA
+
+
+def test_fetch_usdkrw_uses_existing_e3_without_recalc():
+    from infomax.snapshot_daily import _fetch_usdkrw
+
+    class BoomExcel:
+        def CalculateFull(self):
+            raise AssertionError("should not recalc when E3 already has a number")
+
+        @property
+        def ActiveWorkbook(self):
+            raise AssertionError("should not refresh when E3 already has a number")
+
+    ws = _FakeSheet(
+        {
+            "D3": _FakeRange(value2="        ", value="        ", text="        "),
+            "E3": _FakeRange(value2=1415.0, value=1415.0, text="1,415.00"),
+        }
+    )
+    assert _fetch_usdkrw(ws, BoomExcel()) == 1415.0
 
 
 def test_lookback_excludes_today():

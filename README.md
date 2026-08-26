@@ -2,7 +2,7 @@
 
 USDKRW와 주요 시장변수 간 롤링 상관관계 및 시기별 주도변수 변화를 모니터링합니다.
 
-Infomax IMDP Snapshot을 Windows 작업 스케줄러(매일 **06:00**)로 자동 적재하고, Streamlit은 SQLite만 조회합니다.
+Infomax IMDP Snapshot을 Windows 작업 스케줄러(매일 **07:00**)로 자동 적재하고, Streamlit은 SQLite만 조회합니다.
 
 > 상관관계는 동행을 나타낼 뿐, **인과관계를 의미하지 않습니다.**
 
@@ -34,7 +34,7 @@ Infomax IMDP Snapshot을 Windows 작업 스케줄러(매일 **06:00**)로 자동
 - 사이드바 **기준일**(전 거래일)부터 **분석 기간**만큼 조회
 - 시차 정렬은 **서울환시** 기준 (`same_day` / `previous_us_close`)
 - 가격·지수는 로그수익, 금리는 bp 차분, 수급은 레벨로 변환 후 상관 계산
-- 데이터 갱신: 작업 스케줄러 **06:00** → `scripts/run_infomax_daily.bat`
+- 데이터 갱신: 작업 스케줄러 **07:00** → `scripts/run_infomax_daily.bat`
 
 ## 기술 스택
 

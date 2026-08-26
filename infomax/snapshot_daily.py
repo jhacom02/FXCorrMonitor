@@ -237,8 +237,19 @@ def _wait_for_data_refresh(app: Any, wait_seconds: float) -> None:
         time.sleep(remaining)
 
 
+def _ensure_usdkrw_mid_formula(ws: Any) -> None:
+    try:
+        rng = ws.Range(USDKRW_FALLBACK_CELL)
+        formula = str(rng.Formula or "").strip()
+        if formula != USDKRW_FALLBACK_FORMULA:
+            rng.Formula = USDKRW_FALLBACK_FORMULA
+    except Exception:
+        pass
+
+
 def _refresh(excel, wb, ws, query_date: date) -> None:
     ws.Range(DATE_CELL).Value = datetime(query_date.year, query_date.month, query_date.day)
+    _ensure_usdkrw_mid_formula(ws)
     try:
         excel.Calculation = XL_AUTO
     except Exception:
@@ -278,22 +289,32 @@ def _usdkrw_ready(ws: Any) -> bool:
     return parse_number(_read_cell(ws, USDKRW_FALLBACK_CELL)) is not None
 
 
-def _fetch_usdkrw(ws: Any, excel: Any) -> Any:
-    """USDKRW from D3 (현재가); fallback to E3 (KR_MID_Close) via COM when D3 is blank."""
-    primary = _read_cell(ws, USDKRW_CELL)
+def select_usdkrw_raw(primary: Any, fallback: Any) -> Any:
     if parse_number(primary) is not None:
         return primary
+    if parse_number(fallback) is not None:
+        return fallback
+    return primary
 
-    fallback_rng = ws.Range(USDKRW_FALLBACK_CELL)
-    old_formula = ""
-    try:
-        old_formula = str(fallback_rng.Formula or "")
-    except Exception:
-        pass
+
+def _fetch_usdkrw(ws: Any, excel: Any) -> Any:
+    """USDKRW from D3 (현재가); fallback to E3 (KR_MID_Close) when D3 is blank."""
+    primary = _read_cell(ws, USDKRW_CELL)
+    fallback = _read_cell(ws, USDKRW_FALLBACK_CELL)
+    chosen = select_usdkrw_raw(primary, fallback)
+    if parse_number(chosen) is not None:
+        if parse_number(primary) is None:
+            logger.info("USDKRW via %s fallback: %r", USDKRW_FALLBACK_CELL, chosen)
+        return chosen
 
     logger.warning("USDKRW@%s empty; trying KR_MID_Close via %s", USDKRW_CELL, USDKRW_FALLBACK_CELL)
+    fallback_rng = ws.Range(USDKRW_FALLBACK_CELL)
     try:
         fallback_rng.Formula = USDKRW_FALLBACK_FORMULA
+        try:
+            excel.ActiveWorkbook.RefreshAll()
+        except Exception:
+            pass
         try:
             excel.CalculateFull()
         except Exception:
@@ -306,14 +327,8 @@ def _fetch_usdkrw(ws: Any, excel: Any) -> Any:
                 logger.info("USDKRW via %s fallback: %r", USDKRW_FALLBACK_CELL, value)
                 return value
             time.sleep(POLL_INTERVAL)
-    finally:
-        try:
-            if old_formula.startswith("="):
-                fallback_rng.Formula = old_formula
-            else:
-                fallback_rng.Value = "-"
-        except Exception:
-            pass
+    except Exception:
+        pass
 
     return _read_cell(ws, USDKRW_CELL)
 
